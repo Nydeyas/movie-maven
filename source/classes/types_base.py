@@ -14,7 +14,3 @@ class Movie(TypedDict):
     countries: str
     link: str
     image_link: str
-
-class Website(TypedDict):
-    name: str
-    movies: NotRequired[List[Movie]]
