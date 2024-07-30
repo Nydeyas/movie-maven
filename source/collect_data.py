@@ -4,46 +4,53 @@ import pandas as pd
 import importlib
 import pickle
 
-from typing import Dict, Tuple, List
+from typing import Dict, List, Any
+from source.classes.website import Website
 
-from classes.website import Website
+SCRAPE_URLS = {
+    "cda-hd": "https://cda-hd.cc/filmy-online"
+}
 
 
-async def collect_data() -> Tuple[List[str], List[Website]]:
-    SCRAPE_URLS = {
-        "cda-hd": "https://cda-hd.cc/filmy-online"
-    }
-
+async def collect_data() -> List[Website]:
     websites = [w for w in SCRAPE_URLS.keys()]
+
+    # Load existing data
+    existing_data = load_scraped_data(websites)
 
     # Run scripts that collects new data
     await scrape_new_data(SCRAPE_URLS, limit_pages=2)
 
-    # Load new data
-    print("Loading new data...")
+    # Reload data
     data = load_scraped_data(websites)
 
-    return websites, data
+    return data
 
 
-async def scrape_new_data(data: Dict[str, str], limit_pages: int | None) -> None:
+async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: List[Website]) -> None:
     counter = 0
-    tasks_count = len(data)
-    print("Collecting data...")
+    tasks_count = len(urls)
     st = datetime.now()
-    for i, (w_name, link) in enumerate(data.items()):
+    for i, (w_name, link) in enumerate(urls.items()):
         module = importlib.import_module(fr"scrape.{w_name}")
 
+        print(f"Scraping data from {w_name}...")
         # Run web scraping
-        result: Website = await module.scrape_website(w_name, fr'{link}', limit_pages)
+        result = await module.scrape_movies(w_name, fr'{link}', max_pages)
 
-        save_csv(result, fr'data/csv/{w_name}.csv')
-        save_pkl(result, fr'data/pkl/{w_name}.pkl')
+        # Add new data
+        old_size = len(data[i].movies)
+        data[i].add_movies(result, duplicates=False)
+        new_size = len(data[i].movies)
+        print(f"{new_size - old_size} new movies added to data.")
+
+        save_csv(data[i], fr'data/websites/csv/{w_name}.csv')
+        save_pkl(data[i], fr'data/websites/pkl/{w_name}.pkl')
 
         counter += 1
         et = datetime.now()
         time_remain = (et - st) * ((tasks_count - counter) / counter)
-        print(f"Done {counter}/{tasks_count} operations.")
+        print(f"Done {counter}/{tasks_count} scraping operations.")
         print(f"Remaining time approx: {ceil(time_remain.total_seconds() / 60)} min.")
     print("Data collected and saved successfully.")
 
@@ -53,7 +60,7 @@ def load_scraped_data(websites: List[str]) -> List[Website]:
     data = []
     for w_name in websites:
         try:
-            w = load_pkl(fr'data/pkl/{w_name}.pkl')
+            w = load_pkl(fr'data/websites/pkl/{w_name}.pkl')
         except FileNotFoundError as e:
             print(e)
             w = Website(name=w_name, data=[])
@@ -62,7 +69,7 @@ def load_scraped_data(websites: List[str]) -> List[Website]:
     return data
 
 
-def save_pkl(obj: Website, filename: str) -> None:
+def save_pkl(obj: Any, filename: str) -> None:
     """Saves Python object as a pickle file."""
     with open(filename, 'wb') as out:  # Overwrites any existing file.
         pickle.dump(obj, out, pickle.HIGHEST_PROTOCOL)
