@@ -118,10 +118,18 @@ def save_csv(data: Website, filename: str) -> None:
                 columns=columns,
             )
 
-            # Converting columns to Integers in case of None values
-            obj_df['year'] = obj_df['votes'].astype('Int64')
+            # Converting columns
+            obj_df['title'] = obj_df['title'].astype('string')
+            obj_df['description'] = obj_df['description'].astype('string')
+            obj_df['show_type'] = obj_df['show_type'].astype('string')
+            obj_df['tags'] = obj_df['tags'].astype('object')
+            obj_df['year'] = obj_df['year'].astype('Int64')
             obj_df['length'] = obj_df['length'].astype('Int64')
+            # obj_df['rating']
             obj_df['votes'] = obj_df['votes'].astype('Int64')
+            obj_df['countries'] = obj_df['countries'].astype('string')
+            obj_df['link'] = obj_df['link'].astype('string')
+            obj_df['image_link'] = obj_df['image_link'].astype('string')
         else:
             obj_df = pd.DataFrame(columns=columns)
 
