@@ -45,7 +45,7 @@ def scrape_movies(website_name: str, website_link: str, max_pages: int | None) -
             else:
                 pages_count = int(scheme_list[0])
 
-            for page_number in range(220, pages_count + 1):
+            for page_number in range(1, pages_count + 1):
                 # Page with movies
                 print(f"Page: {page_number}/{pages_count}")
 

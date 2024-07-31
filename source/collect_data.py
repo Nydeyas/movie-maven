@@ -19,7 +19,7 @@ async def collect_data() -> List[Website]:
     existing_data = load_scraped_data(websites)
 
     # Run scripts that collects new data
-    await scrape_new_data(SCRAPE_URLS, max_pages=None, data=existing_data)
+    await scrape_new_data(SCRAPE_URLS, max_pages=1, data=existing_data)
 
     # Reload data
     data = load_scraped_data(websites)
