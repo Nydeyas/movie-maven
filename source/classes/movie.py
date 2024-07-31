@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
-    from classes.website import Website
-    from classes.types_base import Movie as MoviePayload
+    from source.classes.website import Website
+    from source.classes.types_base import Movie as MoviePayload
 
 
 class Movie:
@@ -21,12 +21,14 @@ class Movie:
         self.link: str = data.get('link', '')
         self.image_link: str = data.get('image_link', '')
 
-
     def __str__(self) -> str:
         return self.title
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, Movie) and [self.title, self.year, self.length] == [other.title, other.year, other.length]
+        return (
+                isinstance(other, Movie)
+                and [self.title, self.year, self.length] == [other.title, other.year, other.length]
+        )
 
     def __hash__(self):
         return hash((self.title, self.year, self.length))

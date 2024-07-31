@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, List
 
-from classes.movie import Movie
+from source.classes.movie import Movie
 
 if TYPE_CHECKING:
-    from classes.types_base import Movie as MoviePayload
+    from source.classes.types_base import Movie as MoviePayload
 
 
 class Website:
@@ -26,4 +26,3 @@ class Website:
             new_movie = Movie(website=self, data=data)
             if duplicates or new_movie not in self.movies:
                 self.movies.append(new_movie)
-
