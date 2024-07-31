@@ -11,7 +11,7 @@ class Movie:
         self.website: Website = website
         self.title: str = data.get('title', '')
         self.description: str = data.get('description', '')
-        self.show_type: str = data.get('type', '')
+        self.show_type: str = data.get('show_type', '')
         self.tags: Optional[List[str]] = data.get('tags', [])
         self.year: int = data.get('year', 0)
         self.length: int = data.get('length', 0)

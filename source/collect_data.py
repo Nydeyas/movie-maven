@@ -19,7 +19,7 @@ async def collect_data() -> List[Website]:
     existing_data = load_scraped_data(websites)
 
     # Run scripts that collects new data
-    await scrape_new_data(SCRAPE_URLS, limit_pages=2)
+    await scrape_new_data(SCRAPE_URLS, max_pages=None, data=existing_data)
 
     # Reload data
     data = load_scraped_data(websites)
@@ -71,43 +71,62 @@ def load_scraped_data(websites: List[str]) -> List[Website]:
 
 def save_pkl(obj: Any, filename: str) -> None:
     """Saves Python object as a pickle file."""
-    with open(filename, 'wb') as out:  # Overwrites any existing file.
-        pickle.dump(obj, out, pickle.HIGHEST_PROTOCOL)
+    try:
+        with open(filename, 'wb') as out:  # Overwrites any existing file.
+            pickle.dump(obj, out, pickle.HIGHEST_PROTOCOL)
+        print(f"Object successfully saved to {filename}")
+    except (OSError, pickle.PicklingError) as e:
+        print(f"Failed to save object to {filename}: {e}")
 
 
-def load_pkl(filename: str) -> Website:
+def load_pkl(filename: str, value: Any = None) -> Any:
     """Loads saved Python object from local data."""
-    with open(filename, 'rb') as inp:
-        return pickle.load(inp)
+    try:
+        with open(filename, 'rb') as inp:
+            return pickle.load(inp)
+    except (OSError, pickle.UnpicklingError) as e:
+        print(f"Failed to load object from {filename}: {e}")
+        return value
 
 
 def save_csv(data: Website, filename: str) -> None:
     """Saves Website type class object as a csv type file."""
-    columns = ['title', 'description', 'tags', 'year', 'length',
+    columns = ['title', 'description', 'show_type', 'tags', 'year', 'length',
                'rating', 'votes', 'countries', 'link', 'image_link']
 
     movies = data.movies
 
-    if movies:
-        obj_df = pd.DataFrame(
-            [
+    try:
+        if movies:
+            obj_df = pd.DataFrame(
                 [
-                    m.title,
-                    m.description,
-                    m.tags,
-                    m.year,
-                    m.length,
-                    m.rating,
-                    m.votes,
-                    m.countries,
-                    m.link,
-                    m.image_link,
-                ]
-                for m in movies
-            ],
-            columns=columns,
-        )
-    else:
-        obj_df = pd.DataFrame(columns=columns)
+                    [
+                        m.title,
+                        m.description,
+                        m.show_type,
+                        m.tags,
+                        m.year,
+                        m.length,
+                        m.rating,
+                        m.votes,
+                        m.countries,
+                        m.link,
+                        m.image_link,
+                    ]
+                    for m in movies
+                ],
+                columns=columns,
+            )
 
-    obj_df.to_csv(filename, index=False)
+            # Converting columns to Integers in case of None values
+            obj_df['year'] = obj_df['votes'].astype('Int64')
+            obj_df['length'] = obj_df['length'].astype('Int64')
+            obj_df['votes'] = obj_df['votes'].astype('Int64')
+        else:
+            obj_df = pd.DataFrame(columns=columns)
+
+        obj_df.to_csv(filename, index=False)
+        print(f"Data successfully saved to {filename}")
+
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+        print(f"Failed to save data to {filename}: {e}")
