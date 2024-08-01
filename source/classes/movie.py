@@ -27,7 +27,8 @@ class Movie:
     def __eq__(self, other: object) -> bool:
         return (
                 isinstance(other, Movie)
-                and [self.title, self.year, self.length] == [other.title, other.year, other.length]
+                and self.title == other.title
+                and self.year == other.year
         )
 
     def __hash__(self):
