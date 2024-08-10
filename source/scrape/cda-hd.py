@@ -69,7 +69,7 @@ def scrape_movies(website_name: str, website_link: str, max_pages: int | None) -
                     show_type: str = "Film"
 
                     tags_elements = obj.find_elements(By.XPATH, value=".//a[@rel='category tag']")
-                    tags: List[str] = [t.text for t in tags_elements]
+                    tags: str = ', '.join(t.text for t in tags_elements)
 
                     year_text = obj.find_element(By.XPATH, value="./div[2]/span").text
                     year_str = find_last_number(year_text)

@@ -1,12 +1,11 @@
 from typing import TypedDict, List
-from typing_extensions import NotRequired
 
 
 class Movie(TypedDict):
     title: str
     description: str
     show_type: str
-    tags: NotRequired[List[str]]
+    tags: str
     year: int
     length: int
     rating: float

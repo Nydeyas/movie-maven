@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from source.classes.website import Website
@@ -12,7 +12,7 @@ class Movie:
         self.title: str = data.get('title', '')
         self.description: str = data.get('description', '')
         self.show_type: str = data.get('show_type', '')
-        self.tags: Optional[List[str]] = data.get('tags', [])
+        self.tags: str = data.get('tags', '')
         self.year: int = data.get('year', 0)
         self.length: int = data.get('length', 0)
         self.rating: float = data.get('rating', 0.0)
@@ -23,6 +23,10 @@ class Movie:
 
     def __str__(self) -> str:
         return self.title
+
+    def __repr__(self) -> str:
+        cls_name = type(self).__name__
+        return f"{cls_name}(title={self.title!r})"
 
     def __eq__(self, other: object) -> bool:
         return (
