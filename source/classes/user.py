@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple
+from typing import List
 
 import discord
 
@@ -13,7 +13,8 @@ class User:
         self.name: str = member.name
         self.display_name: str = member.display_name
         self.state: UserState = UserState.idle
-        self.movie_list: List[Tuple[Movie, float]] = []
+        self.search_content: List[Movie] = []
+        self.message_id: int = 0
 
     def __repr__(self) -> str:
         cls_name = type(self).__name__
@@ -21,4 +22,3 @@ class User:
 
     def __str__(self) -> str:
         return self.name
-
