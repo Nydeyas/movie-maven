@@ -125,8 +125,8 @@ async def on_message(message: Message) -> None:
         user = get_user(message.author.id)
 
         # Handle User State
-        if user.state in [UserState.search_panel, UserState.search_result]:
-            if message.content.isnumeric() and int(message.content) in range(1, MAX_ROWS + 1):
+        if user.state in {UserState.search_panel, UserState.search_result}:
+            if message.content.isnumeric() and int(message.content) in range(1, len(user.search_content) + 1):
                 user.state = UserState.movie_details
             else:
                 user.state = UserState.search_result
