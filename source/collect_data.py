@@ -3,6 +3,7 @@ from math import ceil
 import pandas as pd
 import importlib
 import pickle
+import logging
 
 from typing import Dict, List, Any
 from source.classes.movie_site import MovieSite
@@ -34,7 +35,7 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
     for i, (w_name, link) in enumerate(urls.items()):
         module = importlib.import_module(fr"scrape.{w_name}")
 
-        print(f"Scraping data from {w_name}...")
+        logging.info(f"Scraping data from {w_name}...")
         # Run web scraping
         result = await module.scrape_movies(w_name, fr'{link}', max_pages)
 
@@ -42,7 +43,7 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
         old_size = len(data[i].movies) if data else 0
         data[i].add_movies(result, duplicates=False)
         new_size = len(data[i].movies)
-        print(f"{new_size - old_size} new movies added to data.")
+        logging.info(f"{new_size - old_size} new movies added to data.")
 
         save_csv(data[i], fr'data/sites/csv/{w_name}.csv')
         save_pkl(data[i], fr'data/sites/pkl/{w_name}.pkl')
@@ -50,9 +51,9 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
         counter += 1
         et = datetime.now()
         time_remain = (et - st) * ((tasks_count - counter) / counter)
-        print(f"Done {counter}/{tasks_count} scraping operations.")
-        print(f"Remaining time approx: {ceil(time_remain.total_seconds() / 60)} min.")
-    print("Data collected and saved successfully.")
+        logging.info(f"Done {counter}/{tasks_count} scraping operations.")
+        logging.info(f"Remaining time approx: {ceil(time_remain.total_seconds() / 60)} min.")
+    logging.info("Data collected and saved successfully.")
 
 
 def load_scraped_data(sites: List[str]) -> List[MovieSite]:
@@ -62,6 +63,7 @@ def load_scraped_data(sites: List[str]) -> List[MovieSite]:
         w = load_pkl(fr'data/sites/pkl/{w_name}.pkl')
         if w is None:
             w = MovieSite(name=w_name, data=[])
+            logging.warning(f"Creating new MovieSite object for {w_name}")
         data.append(w)
 
     return data
@@ -72,9 +74,9 @@ def save_pkl(obj: Any, filename: str) -> None:
     try:
         with open(filename, 'wb') as out:  # Overwrites any existing file.
             pickle.dump(obj, out, pickle.HIGHEST_PROTOCOL)
-        print(f"Object successfully saved to {filename}")
+        logging.info(f"Object successfully saved to {filename}")
     except (OSError, pickle.PicklingError) as e:
-        print(f"Failed to save object to {filename}: {e}")
+        logging.error(f"Failed to save object to {filename}: {e}")
 
 
 def load_pkl(filename: str, value: Any = None) -> Any:
@@ -82,8 +84,14 @@ def load_pkl(filename: str, value: Any = None) -> Any:
     try:
         with open(filename, 'rb') as inp:
             return pickle.load(inp)
+    except FileNotFoundError:
+        logging.warning(f"File not found: {filename}")
+        return value
     except (OSError, pickle.UnpicklingError) as e:
-        print(f"Failed to load object from {filename}: {e}")
+        logging.error(f"Failed to load object from {filename}: {e}")
+        return value
+    except Exception as e:
+        logging.error(f"Unexpected error while loading object from {filename}: {e}")
         return value
 
 
@@ -132,7 +140,7 @@ def save_csv(data: MovieSite, filename: str) -> None:
             obj_df = pd.DataFrame(columns=columns)
 
         obj_df.to_csv(filename, index=False)
-        print(f"Data successfully saved to {filename}")
+        logging.info(f"Data successfully saved to {filename}")
 
     except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
-        print(f"Failed to save data to {filename}: {e}")
+        logging.error(f"Failed to save data to {filename}: {e}")

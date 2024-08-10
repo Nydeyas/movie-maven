@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List
 import re
 from source.classes.types_base import Movie as MoviePayload
-
+import logging
 
 def find_first_number(text: str) -> str:
     """Finds the first number in the text."""
@@ -30,7 +30,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
         href_last_page = element_last_page.get_attribute("href")
     except Exception as e:
         browser.close()
-        print(f"Error 1 in cda-hd.get_movies(): {e}")
+        logging.warning(f"Error 1 in cda-hd.get_movies(): {e}")
         return []
 
     scheme_list = re.findall(r'\d+', href_last_page)
@@ -47,7 +47,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
 
             for page_number in range(1, pages_count + 1):
                 # Page with movies
-                print(f"Page: {page_number}/{pages_count}")
+                logging.info(f"Page: {page_number}/{pages_count}")
 
                 browser.get(f'{site_link}/page/{page_number}/')
 
@@ -105,19 +105,19 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
                             image_link=image_link
                         )
                     )
-            print(f"Found {len(movies)} movies.")
+            logging.info(f"Found {len(movies)} movies.")
 
         except Exception as e:
-            print(f"Error 3 in cda-hd.get_movies(): {e}")
+            logging.warning(f"Error 3 in cda-hd.get_movies(): {e}")
             return []
 
     else:
         browser.close()
-        print(
+        logging.warning(
             f"Error 2: Cannot process element: 'page_count' in cda-hd.get_movies(), site_name = {site_name}")
         return []
 
     b = datetime.now()
-    print(f"cda-hd.get_movies() completed: {b - a}")
+    logging.info(f"cda-hd.get_movies() completed: {b - a}")
     browser.close()
     return movies

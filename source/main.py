@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 from typing import Dict, List
+from logging.handlers import TimedRotatingFileHandler
 
 import discord
 from discord import Message
@@ -11,10 +12,31 @@ from difflib import SequenceMatcher
 from Levenshtein import distance
 import collect_data
 from dotenv import load_dotenv
+import logging
 
 from source.classes.enums import UserState
 from source.classes.movie import Movie
 from source.classes.user import User
+
+# Logging
+# Set up the log file handler to rotate daily
+log_file_handler = TimedRotatingFileHandler(
+    filename='logs/logfile.log',   # Active log file
+    when='midnight',               # When to rotate
+    interval=1,                    # Interval for rotation
+    backupCount=10000,             # Number of backup files to keep
+    encoding='utf-8',              # Encoding of the log file
+    utc=False                      # UTC or local time
+)
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        log_file_handler,
+        logging.StreamHandler()
+    ]
+)
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -49,7 +71,7 @@ bot.g_sites = []  # List of Sites with Movies data
 
 @bot.event
 async def on_ready() -> None:
-    print(f'Logged as: {bot.user}')
+    logging.info(f'Logged as: {bot.user}')
 
     # Start tasks
     update_site_data.start()
@@ -58,15 +80,15 @@ async def on_ready() -> None:
 
 @tasks.loop(hours=12)
 async def update_site_data() -> None:
-    print("Collecting data...")
+    logging.info("Collecting data...")
     data = await collect_data.collect_data()
 
-    print("Loading data...")
+    logging.info("Loading data...")
     bot.g_locked = True  # bot controls blocked
     await asyncio.sleep(3)  # wait in case of handle state running
     bot.g_sites = data
     bot.g_locked = False
-    print(f"Using sites: {', '.join(w.name for w in bot.g_sites)}")
+    logging.info(f"Using sites: {', '.join(w.name for w in bot.g_sites)}")
 
 
 @tasks.loop(minutes=5)
@@ -76,7 +98,7 @@ async def save_user_data() -> None:
     collect_data.save_pkl(bot.g_users, f'{USERS_PATH}/users.pkl')
 
     z2 = datetime.now()
-    print("save_user_data(): " + str(z2 - z1))
+    logging.info("save_user_data(): " + str(z2 - z1))
 
 
 @bot.command(aliases=['szukaj', 's', 'filmy', 'films', 'movies'], brief='Wyszukiwanie filmów',
@@ -121,15 +143,14 @@ async def on_message(message: Message) -> None:
                 # Find bot message
                 try:
                     fetched_message = await message.channel.fetch_message(user.message_id)
-                    print(f"[main.py]: Message found ({str(message.channel)})")
+                    logging.info(f"[main.py]: Message found ({str(message.channel)})")
                 except discord.HTTPException as err:
-                    print(f"[main.py]: Message not found ({str(message.channel)})")
-                    print(f"[ERROR game_loop.py]: [HTTPException] {err}")
+                    logging.warning(f"[main.py]: Error fetching message ({message.channel}): {err}")
                     user.state = UserState.idle
                 else:
                     await handler(message, fetched_message)
             else:
-                print(f"[main.py]: Unknown UserState: {state}")
+                logging.warning(f"[main.py]: Unknown UserState: {state}")
 
     await bot.process_commands(message)
 
