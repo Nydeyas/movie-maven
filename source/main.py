@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-from typing import Dict, List
 from logging.handlers import TimedRotatingFileHandler
 
 import discord
@@ -8,14 +7,11 @@ from discord import Message
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 import os
-from difflib import SequenceMatcher
-from Levenshtein import distance
 import collect_data
 from dotenv import load_dotenv
 import logging
 
 from source.classes.enums import UserState
-from source.classes.movie import Movie
 from source.classes.user import User
 
 # Logging
@@ -60,8 +56,10 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 # Constants
 TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
 USERS_PATH = "data/users"
-MAX_ROWS = 12  # max number of rows showed in the movie search
-REQUIRED_MATCH_SCORE = 40  # minimum score of similarity in the search(0-100)
+MAX_ROWS_SEARCH = 12  # max number of rows showed in movie search
+MAX_FIELD_LENGTH = 1024  # max length of the embed fields (up to 1024 characters limited by Discord)
+MIN_MATCH_SCORE = 40  # minimum score of similarity in the search(0-100)
+
 
 # Global Bot values
 bot.g_locked = False
@@ -119,6 +117,7 @@ async def on_message(message: Message) -> None:
             and is_user(message.author.id)
             and not message.content.startswith(tuple(bot.command_prefix))
     ):
+        # Ignore bot's own messages
         if message.author == bot.user:
             return
 
@@ -139,16 +138,16 @@ async def on_message(message: Message) -> None:
                 UserState.movie_details: movie_details,
             }
             handler = state_functions.get(state, None)
+
             if handler:
                 # Find bot message
                 try:
                     fetched_message = await message.channel.fetch_message(user.message_id)
                     logging.info(f"[main.py]: Message found ({str(message.channel)})")
+                    await handler(message, fetched_message)
                 except discord.HTTPException as err:
                     logging.warning(f"[main.py]: Error fetching message ({message.channel}): {err}")
                     user.state = UserState.idle
-                else:
-                    await handler(message, fetched_message)
             else:
                 logging.warning(f"[main.py]: Unknown UserState: {state}")
 
@@ -158,119 +157,129 @@ async def on_message(message: Message) -> None:
 async def search_panel(user_message: Message) -> None:
     """Main panel of search engine"""
     ctx = await bot.get_context(user_message)
-    title = "Wyszukiwarka filmów"
+    user = get_user(ctx.author.id)
+    title = f"Wyszukiwarka filmów ({user.display_name})"
     sites = bot.g_sites
 
-    if sites and sites[0].movies:
-        # Make list of movies
-        movies = []
-        for i in range(1, MAX_ROWS + 1):
-            m = sites[0].movies[-i]
-            movies.append(m)
-
-        # Make description
-        field_title = ''
-        field_year_tags = ''
-        field_rating = ''
-        for i, movie in enumerate(movies):
-            m_title = movie.title
-            m_year = movie.year
-            m_tags = movie.tags
-            m_rating = movie.rating
-
-            # Split removes alternative titles
-            column_title = f"{i + 1}\. {m_title.split('/')[0]}"
-            column_year_tags = f"{m_year}\u2003{m_tags}"
-            column_rating = f"{m_rating}"
-
-            if len(column_title) >= 37:
-                column_title = column_title[:34] + "..."
-            if len(column_year_tags) >= 26:
-                column_year_tags = column_year_tags[:24].rstrip(",") + "..."
-
-            field_title += column_title + "\n"
-            field_year_tags += column_year_tags + "\n"
-            field_rating += column_rating + "\n"
-
-        description = "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n" \
-                      "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
-        embed = construct_embedded_message(field_title, field_year_tags, field_rating,  title=title,
-                                           description=description)
-
-        # Send embedded message
-        msg = await user_message.channel.send(embed=embed)
-
-        # Update User
-        user = get_user(ctx.author.id)
-        user.message_id = msg.id
-        user.state = UserState.search_panel
-        user.search_content = movies
-    else:
+    if not (sites and sites[0].movies):
         description = "Brak filmów w bazie."
         embed = construct_embedded_message(title=title, description=description)
         # Send embedded message
         await user_message.channel.send(embed=embed)
+        return
+
+    # Make list of last added movies
+    movies = sites[0].get_movies_sorted_by_date_added(max_items=MAX_ROWS_SEARCH, reverse=True)
+
+    # Make description
+    field_title = ''
+    field_year_tags = ''
+    field_rating = ''
+    for i, movie in enumerate(movies):
+        m_title = movie.title
+        m_year = movie.year
+        m_tags = movie.tags
+        m_rating = movie.rating
+
+        # Split removes alternative titles
+        column_title = f"{i + 1}\. {m_title.split('/')[0]}"
+        column_year_tags = f"{m_year}\u2003{m_tags}"
+        column_rating = f"{m_rating}"
+
+        # Limit Row Width
+        if len(column_title) >= 37:
+            column_title = column_title[:34] + "..."
+        if len(column_year_tags) >= 26:
+            column_year_tags = column_year_tags[:24].rstrip(",") + "..."
+
+        # Check field length limit
+        if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                len(field_year_tags) + len(field_year_tags) + 1 > MAX_FIELD_LENGTH or
+                len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+            break
+
+        field_title += column_title + "\n"
+        field_year_tags += column_year_tags + "\n"
+        field_rating += column_rating + "\n"
+
+    description = "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n" \
+                  "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
+    embed = construct_embedded_message(field_title, field_year_tags, field_rating,  title=title,
+                                       description=description)
+
+    # Send embedded message
+    msg = await user_message.channel.send(embed=embed)
+
+    # Update User
+    user.message_id = msg.id
+    user.state = UserState.search_panel
+    user.search_content = movies
 
 
 async def search_result(user_message: Message, bot_message: Message) -> None:
     """Search result panel shown (List of movies)"""
-    user_input = user_message.content
     user = get_user(user_message.author.id)
 
-    title = "Wyszukiwarka filmów"
+    if not user:
+        title = "Wyszukiwarka filmów (Brak użytkownika)"
+        description = "**Użytkownik nie istnieje.**\n\n"
+        embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
+        await user_message.delete()
+        await bot_message.edit(embed=embed)
+        return
 
-    # Search for movie matches in all sites
-    movie_matches: Dict[Movie, float] = {}
+    title = f"Wyszukiwarka filmów ({user.display_name})"
+    user_input = user_message.content
+
+    movies = []
     for site in list(bot.g_sites):
-        for movie in site.movies:
-            smp = simple_match_percentage(user_input.lower(), movie.title.lower())
-            ldp = levenshtein_distance_percentage(user_input.lower(), movie.title.lower())
-            lcsp = longest_common_substring_percentage(user_input.lower(), movie.title.lower())
-            match_score = 25 * smp + 5 * ldp + 70 * lcsp
-            movie_matches[movie] = match_score
+        movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH, min_match_score=MIN_MATCH_SCORE)
 
-    if movie_matches:
-        # Sort dict by match score
-        movie_matches_sorted = sorted(movie_matches.items(), key=lambda x: x[1], reverse=True)
-        # Filter results
-        movie_matches_sorted = movie_matches_sorted[:MAX_ROWS]
-        movies: List[Movie] = [movie for movie, score in movie_matches_sorted if score >= REQUIRED_MATCH_SCORE]
-
-        # Make description
-        description = "**Znalezione wyniki:**\n\n"
-        field_title = ''
-        field_year_tags = ''
-        field_rating = ''
-
-        for i, movie in enumerate(movies):
-            m_title = movie.title
-            m_year = movie.year
-            m_tags = movie.tags
-            m_rating = movie.rating
-
-            # Split removes alternative titles
-            column_title = f"{i + 1}\. {m_title.split('/')[0]}"
-            column_year_tags = f"{m_year}\u2003{m_tags}"
-            column_rating = f"{m_rating}"
-
-            if len(column_title) >= 37:
-                column_title = column_title[:34] + "..."
-            if len(column_year_tags) >= 26:
-                column_year_tags = column_year_tags[:23].rstrip(",") + "..."
-
-            field_title += column_title + "\n"
-            field_year_tags += column_year_tags + "\n"
-            field_rating += column_rating + "\n"
-
-        # Send embedded message
-        embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
-                                           description=description)
-        # Update User
-        user.search_content = movies
-
-    else:
+    if not movies:
         description = "Nie znaleziono pasujących wyników."
         embed = construct_embedded_message(title=title, description=description)
+        await user_message.delete()
+        await bot_message.edit(embed=embed)
+        return
+
+    # Make description
+    description = "**Znalezione wyniki:**\n\n"
+    field_title = ''
+    field_year_tags = ''
+    field_rating = ''
+
+    for i, movie in enumerate(movies):
+        m_title = movie.title
+        m_year = movie.year
+        m_tags = movie.tags
+        m_rating = movie.rating
+
+        # Split removes alternative titles
+        column_title = f"{i + 1}\. {m_title.split('/')[0]}"
+        column_year_tags = f"{m_year}\u2003{m_tags}"
+        column_rating = f"{m_rating}"
+
+        # Limit Row Width
+        if len(column_title) >= 37:
+            column_title = column_title[:34] + "..."
+        if len(column_year_tags) >= 26:
+            column_year_tags = column_year_tags[:23].rstrip(",") + "..."
+
+        # Check field length limit
+        if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                len(field_year_tags) + len(field_year_tags) + 1 > MAX_FIELD_LENGTH or
+                len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+            break
+
+        field_title += column_title + "\n"
+        field_year_tags += column_year_tags + "\n"
+        field_rating += column_rating + "\n"
+
+    # Send embedded message
+    embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
+                                       description=description)
+    # Update User
+    user.search_content = movies
 
     # Delete User message, Edit Bot message
     await user_message.delete()
@@ -279,49 +288,43 @@ async def search_result(user_message: Message, bot_message: Message) -> None:
 
 async def movie_details(user_message: Message, bot_message: Message) -> None:
     """Individual movie panel"""
-    input_int = int(user_message.content)
     user = get_user(user_message.author.id)
-    search_content = user.search_content
 
-    title = "Wyszukiwarka filmów"
-
-    if input_int in range(1, len(search_content) + 1):
-
-        selected_movie = search_content[input_int - 1]
-
-        m_title = selected_movie.title
-        m_description = selected_movie.description
-        m_show_type = selected_movie.show_type
-        m_tags = selected_movie.tags
-        m_year = selected_movie.year
-        m_length = selected_movie.length
-        m_rating = selected_movie.rating
-        m_votes = selected_movie.votes
-        m_countries = selected_movie.countries
-        m_link = selected_movie.link
-        m_image_link = selected_movie.image_link
-        title = m_title
-        # Make description
-        description = f"**{m_year}r\u2004|\u2004{m_length}min\u2004|\u2004{m_tags}\n\n**" \
-                      f"{m_description}\n\n" \
-                      f"**Ocena: {m_rating}/10**\n" \
-                      f"{m_votes} głosów\n\n" \
-                      f"Format: {m_show_type}\n" \
-                      f"Kraje: {m_countries}\n\n" \
-                      f"Link: {m_link}\n\n"
-
-        # Make embedded message
-        embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
-
-        # Set Embed's image
-        embed.set_image(url=m_image_link)
-
-    elif not user:
+    if not user:
+        title = "Wyszukiwarka filmów (Brak użytkownika)"
         description = "**Użytkownik nie istnieje.**\n\n"
         embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
-    else:
+        await user_message.delete()
+        await bot_message.edit(embed=embed)
+        return
+
+    title = f"Wyszukiwarka filmów ({user.display_name})"
+    input_int = int(user_message.content)
+
+    if input_int not in range(1, len(user.search_content) + 1):
         description = "**Wprowadzono liczbę poza zakresem.**\n\n"
         embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
+        await user_message.delete()
+        await bot_message.edit(embed=embed)
+        return
+
+    selected_movie = user.search_content[input_int - 1]
+
+    description = (
+        f"**{selected_movie.year}r\u2004|\u2004{selected_movie.length}min\u2004|\u2004{selected_movie.tags}**\n\n"
+        f"{selected_movie.description}\n\n"
+        f"**Ocena: {selected_movie.rating}/10**\n"
+        f"{selected_movie.votes} głosów\n\n"
+        f"Format: {selected_movie.show_type}\n"
+        f"Kraje: {selected_movie.countries}\n\n"
+        f"Link: {selected_movie.link}\n\n"
+    )
+
+    # Make embedded message
+    embed = construct_embedded_message(title=selected_movie.title, description=description, footer='(w - wróć)')
+
+    # Set Embed's image
+    embed.set_image(url=selected_movie.image_link)
 
     # Delete User message, Edit Bot message
     await user_message.delete()
@@ -350,41 +353,6 @@ def construct_embedded_message(*fields: str, title: str = '', description: str =
         embed.add_field(name="", value=f, inline=True)
     embed.set_footer(text=footer)
     return embed
-
-
-def simple_match_percentage(s1: str, s2: str) -> float:
-    """Computes the simple comparison of s1 and s2"""
-    assert min(len(s1), len(s2)) > 0, "One of the given string is empty"
-    s1_split = s1.split(" ")
-    result = [1 for x in s1_split if x in s2]
-    return len(result) / len(s1_split)
-
-
-def longest_common_substring(s1: str, s2: str) -> str:
-    """Computes the longest common substring of s1 and s2"""
-    seq_matcher = SequenceMatcher(isjunk=None, a=s1, b=s2)
-    match = seq_matcher.find_longest_match(0, len(s1), 0, len(s2))
-
-    if match.size:
-        return s1[match.a: match.a + match.size]
-    else:
-        return ""
-
-
-def longest_common_substring_percentage(s1: str, s2: str) -> float:
-    """Computes the longest common substring percentage of s1 and s2"""
-    assert min(len(s1), len(s2)) > 0, "One of the given string is empty"
-    return len(longest_common_substring(s1, s2)) / min(len(s1), len(s2))
-
-
-def levenshtein_distance_percentage(s1: str, s2: str) -> float:
-    """
-    Computes the Levenshtein distance.
-    Used for misspelled or slightly changed strings.
-    """
-
-    assert min(len(s1), len(s2)) > 0, "One of the given string is empty"
-    return 1. - distance(s1, s2) / max(len(s1), len(s2))
 
 
 bot.run(TOKEN)
