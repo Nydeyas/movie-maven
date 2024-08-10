@@ -2,13 +2,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from source.classes.website import Website
+    from source.classes.movie_site import MovieSite
     from source.classes.types_base import Movie as MoviePayload
 
 
 class Movie:
-    def __init__(self, website: Website, data: MoviePayload) -> None:
-        self.website: Website = website
+    def __init__(self, site: MovieSite, data: MoviePayload) -> None:
+        self.site: MovieSite = site
         self.title: str = data.get('title', '')
         self.description: str = data.get('description', '')
         self.show_type: str = data.get('show_type', '')

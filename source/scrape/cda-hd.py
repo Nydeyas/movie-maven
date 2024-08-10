@@ -18,14 +18,14 @@ def find_last_number(text: str) -> str:
 
 
 @to_thread
-def scrape_movies(website_name: str, website_link: str, max_pages: int | None) -> List[MoviePayload]:
+def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List[MoviePayload]:
     options = webdriver.FirefoxOptions()
     options.add_argument('-headless')
     browser = webdriver.Firefox(options=options)
     a = datetime.now()
 
     try:
-        browser.get(f'{website_link}/page/1/')
+        browser.get(f'{site_link}/page/1/')
         element_last_page = browser.find_element(By.LINK_TEXT, value="Ostatnia")
         href_last_page = element_last_page.get_attribute("href")
     except Exception as e:
@@ -49,7 +49,7 @@ def scrape_movies(website_name: str, website_link: str, max_pages: int | None) -
                 # Page with movies
                 print(f"Page: {page_number}/{pages_count}")
 
-                browser.get(f'{website_link}/page/{page_number}/')
+                browser.get(f'{site_link}/page/{page_number}/')
 
                 sector = browser.find_element(By.CLASS_NAME, "item_1")
                 elements = sector.find_elements(By.CLASS_NAME, "item")
@@ -114,7 +114,7 @@ def scrape_movies(website_name: str, website_link: str, max_pages: int | None) -
     else:
         browser.close()
         print(
-            f"Error 2: Cannot process element: 'page_count' in cda-hd.get_movies(), website_name = {website_name}")
+            f"Error 2: Cannot process element: 'page_count' in cda-hd.get_movies(), site_name = {site_name}")
         return []
 
     b = datetime.now()

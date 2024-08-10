@@ -37,7 +37,7 @@ USERS_PATH = "data/users"
 # Global Bot values
 bot.g_locked = False
 bot.g_users = collect_data.load_pkl(f'{USERS_PATH}/users.pkl', [])  # List of Users with Movies lists.
-bot.g_websites = []  # List of Websites with Movies data
+bot.g_sites = []  # List of Sites with Movies data
 
 
 @bot.event
@@ -45,21 +45,21 @@ async def on_ready() -> None:
     print(f'Logged as: {bot.user}')
 
     # Start tasks
-    update_website_data.start()
+    update_site_data.start()
     save_user_data.start()
 
 
-@tasks.loop(minutes=120)
-async def update_website_data() -> None:
+@tasks.loop(hours=12)
+async def update_site_data() -> None:
     print("Collecting data...")
     data = await collect_data.collect_data()
 
     print("Loading data...")
     bot.g_locked = True  # bot controls blocked
     await asyncio.sleep(3)  # wait in case of handle state running
-    bot.g_websites = data
+    bot.g_sites = data
     bot.g_locked = False
-    print(f"Using websites: {', '.join(w.name for w in bot.g_websites)}")
+    print(f"Using sites: {', '.join(w.name for w in bot.g_sites)}")
 
 
 @tasks.loop(seconds=120)

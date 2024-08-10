@@ -5,29 +5,29 @@ import importlib
 import pickle
 
 from typing import Dict, List, Any
-from source.classes.website import Website
+from source.classes.movie_site import MovieSite
 
 SCRAPE_URLS = {
     "cda-hd": "https://cda-hd.cc/filmy-online"
 }
 
 
-async def collect_data() -> List[Website]:
-    websites = [w for w in SCRAPE_URLS.keys()]
+async def collect_data() -> List[MovieSite]:
+    sites = [w for w in SCRAPE_URLS.keys()]
 
     # Load existing data
-    existing_data = load_scraped_data(websites)
+    existing_data = load_scraped_data(sites)
 
     # Run scripts that collects new data
     await scrape_new_data(SCRAPE_URLS, max_pages=1, data=existing_data)
 
     # Reload data
-    data = load_scraped_data(websites)
+    data = load_scraped_data(sites)
 
     return data
 
 
-async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: List[Website]) -> None:
+async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: List[MovieSite]) -> None:
     counter = 0
     tasks_count = len(urls)
     st = datetime.now()
@@ -44,8 +44,8 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
         new_size = len(data[i].movies)
         print(f"{new_size - old_size} new movies added to data.")
 
-        save_csv(data[i], fr'data/websites/csv/{w_name}.csv')
-        save_pkl(data[i], fr'data/websites/pkl/{w_name}.pkl')
+        save_csv(data[i], fr'data/sites/csv/{w_name}.csv')
+        save_pkl(data[i], fr'data/sites/pkl/{w_name}.pkl')
 
         counter += 1
         et = datetime.now()
@@ -55,16 +55,16 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
     print("Data collected and saved successfully.")
 
 
-def load_scraped_data(websites: List[str]) -> List[Website]:
+def load_scraped_data(sites: List[str]) -> List[MovieSite]:
     """Loads data to bot"""
     data = []
-    for w_name in websites:
         try:
             w = load_pkl(fr'data/websites/pkl/{w_name}.pkl')
         except FileNotFoundError as e:
             print(e)
             w = Website(name=w_name, data=[])
 
+    for w_name in sites:
         data.append(w)
     return data
 
@@ -89,8 +89,8 @@ def load_pkl(filename: str, value: Any = None) -> Any:
         return value
 
 
-def save_csv(data: Website, filename: str) -> None:
-    """Saves Website type class object as a csv type file."""
+def save_csv(data: MovieSite, filename: str) -> None:
+    """Saves site type class object as a csv type file."""
     columns = ['title', 'description', 'show_type', 'tags', 'year', 'length',
                'rating', 'votes', 'countries', 'link', 'image_link']
 
