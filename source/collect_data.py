@@ -39,7 +39,7 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
         result = await module.scrape_movies(w_name, fr'{link}', max_pages)
 
         # Add new data
-        old_size = len(data[i].movies)
+        old_size = len(data[i].movies) if data else 0
         data[i].add_movies(result, duplicates=False)
         new_size = len(data[i].movies)
         print(f"{new_size - old_size} new movies added to data.")
@@ -58,14 +58,12 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
 def load_scraped_data(sites: List[str]) -> List[MovieSite]:
     """Loads data to bot"""
     data = []
-        try:
-            w = load_pkl(fr'data/websites/pkl/{w_name}.pkl')
-        except FileNotFoundError as e:
-            print(e)
-            w = Website(name=w_name, data=[])
-
     for w_name in sites:
+        w = load_pkl(fr'data/sites/pkl/{w_name}.pkl')
+        if w is None:
+            w = MovieSite(name=w_name, data=[])
         data.append(w)
+
     return data
 
 
