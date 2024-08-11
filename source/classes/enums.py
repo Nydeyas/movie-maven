@@ -7,6 +7,7 @@ class UserState(Enum):
     search_panel = 2
     search_result = 3
     movie_details = 4
+    watchlist_panel = 5
 
     def __str__(self) -> str:
         return self.name

@@ -5,6 +5,7 @@ import discord
 
 from source.classes.enums import UserState
 from source.classes.movie import Movie
+from source.classes.watchlist import Watchlist
 
 
 class User:
@@ -15,6 +16,7 @@ class User:
         self.state: UserState = UserState.idle
         self.search_content: List[Movie] = []
         self.message_id: int = 0
+        self.watchlist: Watchlist = Watchlist(self)
 
     def __repr__(self) -> str:
         cls_name = type(self).__name__

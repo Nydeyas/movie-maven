@@ -57,6 +57,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
 USERS_PATH = "data/users"
 MAX_ROWS_SEARCH = 12  # max number of rows showed in movie search
+MAX_ROWS_WATCHLIST = 20  # max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # max length of the embed fields (up to 1024 characters limited by Discord)
 MIN_MATCH_SCORE = 40  # minimum score of similarity in the search(0-100)
 
@@ -107,6 +108,16 @@ async def search(ctx: Context) -> None:
             # Add new User
             bot.g_users.append(User(ctx.author))
         await search_panel(ctx.message)
+
+
+@bot.command(aliases=['list', 'lista', 'w', 'wl', 'l'], brief='Lista filmów użytkownika',
+             description='Wyświetla listę filmów użytkownika wraz z ocenami')
+async def watchlist(ctx: Context) -> None:
+    if ctx.channel.id in TEXT_CHANNELS and not bot.g_locked:
+        if not is_user(ctx.author.id):
+            # Add new User
+            bot.g_users.append(User(ctx.author))
+        await watchlist_panel(ctx.message)
 
 
 @bot.event
@@ -329,6 +340,62 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     # Delete User message, Edit Bot message
     await user_message.delete()
     await bot_message.edit(embed=embed)
+
+
+async def watchlist_panel(user_message: Message) -> None:
+    """Main panel of search engine"""
+    ctx = await bot.get_context(user_message)
+    user = get_user(ctx.author.id)
+    title = f"Lista filmów użytkownika {user.display_name}"
+    entries = user.watchlist.get_entries_sorted_by_title()
+
+    if not entries:
+        description = "**Twoja lista jest pusta.**\n" \
+                      "Skorzystaj z komendy **m.szukaj**, aby wyszukać i dodać wybrane przez siebie filmy."
+        embed = construct_embedded_message(title=title, description=description)
+        # Send embedded message
+        await user_message.channel.send(embed=embed)
+        return
+
+    # Make description
+    field_title = 'Tytuł\n'
+    field_date = 'Data dodania\n'
+    field_rating = 'Ocena\n'
+    for i, entry in enumerate(entries):
+        e_title = entry.movie.title
+        e_date = entry.date_added
+        e_rating = entry.rating
+
+        # Split removes alternative titles
+        column_title = f"{i + 1}\. {e_title}"
+        column_date = f"{e_date}"
+        column_rating = f"{e_rating}"
+
+        # Limit Row Width
+        if len(column_title) >= 53:
+            column_title = column_title[:50] + "..."
+
+        # Check field length limit
+        if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                len(field_date) + len(column_date) + 1 > MAX_FIELD_LENGTH or
+                len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+            break
+
+        field_title += column_title + "\n"
+        field_date += column_date + "\n"
+        field_rating += column_rating + "\n"
+
+    description = ""
+    embed = construct_embedded_message(field_title, field_date, field_rating,  title=title,
+                                       description=description)
+
+    # Send embedded message
+    msg = await user_message.channel.send(embed=embed)
+
+    # Update User
+    user.message_id = msg.id
+    user.state = UserState.watchlist_panel
+    user.search_content = [e.movie for e in entries]
 
 
 def is_user(user_id: int):
