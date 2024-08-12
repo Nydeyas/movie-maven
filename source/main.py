@@ -34,14 +34,20 @@ logging.basicConfig(
     ]
 )
 
-load_dotenv()  # Load environment variables from .env file
+# Load environment variables
+load_dotenv()
 
-# Intents and token
+# Discord Bot token
+TOKEN = os.getenv('TOKEN')
+if not TOKEN:
+    raise ValueError(
+        f"Environment variable 'TOKEN' is not set. Please set it in the .env file before running the application.")
+
+# Intents
 intents = discord.Intents.default()
 intents.message_content = True
-TOKEN = os.getenv('TOKEN')
 
-# Change the no_category default string
+# Change the no_category default string in help command
 help_command = commands.DefaultHelpCommand(
     no_category='Commands',
 )
