@@ -47,7 +47,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
 
             for page_number in range(1, pages_count + 1):
                 # Page with movies
-                logging.info(f"Page: {page_number}/{pages_count}")
+                logging.info(f"Page: {page_number}/{pages_count}...")
 
                 browser.get(f'{site_link}/page/{page_number}/')
 

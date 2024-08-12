@@ -175,128 +175,142 @@ async def search_panel(user_message: Message) -> None:
     """Main panel of search engine"""
     ctx = await bot.get_context(user_message)
     user = get_user(ctx.author.id)
-    title = f"Wyszukiwarka filmów ({user.display_name})"
-    sites = bot.g_sites
+    result_movies = []
+    i = 1
 
-    if not (sites and sites[0].movies):
+    title = f"Wyszukiwarka filmów ({user.display_name})"
+    description = "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n" \
+                  "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
+    field_title = ''
+    field_year_tags = ''
+    field_rating = ''
+
+    for site in list(bot.g_sites):
+        site_name = f"**{str(site).upper()}:**\n"
+        line_break = "\u200B\n"
+
+        # Check field length limit
+        if (len(field_title) + len(site_name) > MAX_FIELD_LENGTH or
+                len(field_year_tags) + len(line_break) > MAX_FIELD_LENGTH or
+                len(field_rating) + len(line_break) > MAX_FIELD_LENGTH):
+            break
+
+        # Add site name to field_title and placeholders for alignment
+        field_title += site_name
+        field_year_tags += line_break
+        field_rating += line_break
+
+        # Make list of last added movies
+        site_movies = site.get_movies_sorted_by_date_added(max_items=MAX_ROWS_SEARCH, reverse=True)
+        result_movies.extend(site_movies)
+
+        for movie in site_movies:
+            # Split removes alternative titles
+            column_title = f"{i}\. {movie.title.split('/')[0]}"
+            column_year_tags = f"{movie.year}\u2003{movie.tags}"
+            column_rating = f"{movie.rating}"
+
+            # Limit Row Width
+            if len(column_title) >= 37:
+                column_title = column_title[:34] + "..."
+            if len(column_year_tags) >= 26:
+                column_year_tags = column_year_tags[:23].rstrip(",") + "..."
+
+            # Check field length limit
+            if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                    len(field_year_tags) + len(column_year_tags) + 1 > MAX_FIELD_LENGTH or
+                    len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+                break
+
+            field_title += column_title + "\n"
+            field_year_tags += column_year_tags + "\n"
+            field_rating += column_rating + "\n"
+            i += 1
+
+    if not result_movies:
         description = "Brak filmów w bazie."
         embed = construct_embedded_message(title=title, description=description)
         # Send embedded message
         await user_message.channel.send(embed=embed)
         return
 
-    # Make list of last added movies
-    movies = sites[0].get_movies_sorted_by_date_added(max_items=MAX_ROWS_SEARCH, reverse=True)
-
-    # Make description
-    field_title = ''
-    field_year_tags = ''
-    field_rating = ''
-    for i, movie in enumerate(movies):
-        m_title = movie.title
-        m_year = movie.year
-        m_tags = movie.tags
-        m_rating = movie.rating
-
-        # Split removes alternative titles
-        column_title = f"{i + 1}\. {m_title.split('/')[0]}"
-        column_year_tags = f"{m_year}\u2003{m_tags}"
-        column_rating = f"{m_rating}"
-
-        # Limit Row Width
-        if len(column_title) >= 37:
-            column_title = column_title[:34] + "..."
-        if len(column_year_tags) >= 26:
-            column_year_tags = column_year_tags[:24].rstrip(",") + "..."
-
-        # Check field length limit
-        if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
-                len(field_year_tags) + len(field_year_tags) + 1 > MAX_FIELD_LENGTH or
-                len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
-            break
-
-        field_title += column_title + "\n"
-        field_year_tags += column_year_tags + "\n"
-        field_rating += column_rating + "\n"
-
-    description = "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n" \
-                  "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
+    # Send embedded message
     embed = construct_embedded_message(field_title, field_year_tags, field_rating,  title=title,
                                        description=description)
-
-    # Send embedded message
     msg = await user_message.channel.send(embed=embed)
 
     # Update User
     user.message_id = msg.id
     user.state = UserState.search_panel
-    user.search_content = movies
+    user.search_content = result_movies
 
 
 async def search_result(user_message: Message, bot_message: Message) -> None:
     """Search result panel shown (List of movies)"""
     user = get_user(user_message.author.id)
-
-    if not user:
-        title = "Wyszukiwarka filmów (Brak użytkownika)"
-        description = "**Użytkownik nie istnieje.**\n\n"
-        embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
-        await user_message.delete()
-        await bot_message.edit(embed=embed)
-        return
+    user_input = user_message.content
+    result_movies = []
+    i = 1
 
     title = f"Wyszukiwarka filmów ({user.display_name})"
-    user_input = user_message.content
+    description = "**Znalezione wyniki:**\n\n"
+    field_title = ''
+    field_year_tags = ''
+    field_rating = ''
 
-    movies = []
     for site in list(bot.g_sites):
-        movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH, min_match_score=MIN_MATCH_SCORE)
+        site_name = f"**{str(site).upper()}:**\n"
+        line_break = "\u200B\n"
 
-    if not movies:
+        # Check field length limit
+        if (len(field_title) + len(site_name) > MAX_FIELD_LENGTH or
+                len(field_year_tags) + len(line_break) > MAX_FIELD_LENGTH or
+                len(field_rating) + len(line_break) > MAX_FIELD_LENGTH):
+            break
+
+        # Add site name to field_title and placeholders for alignment
+        field_title += site_name
+        field_year_tags += line_break
+        field_rating += line_break
+
+        site_movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH, min_match_score=MIN_MATCH_SCORE)
+        result_movies.extend(site_movies)
+
+        for movie in site_movies:
+            # Split removes alternative titles
+            column_title = f"{i}\. {movie.title.split('/')[0]}"
+            column_year_tags = f"{movie.year}\u2003{movie.tags}"
+            column_rating = f"{movie.rating}"
+
+            # Limit Row Width
+            if len(column_title) >= 37:
+                column_title = column_title[:34] + "..."
+            if len(column_year_tags) >= 26:
+                column_year_tags = column_year_tags[:23].rstrip(",") + "..."
+
+            # Check field length limit
+            if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                    len(field_year_tags) + len(column_year_tags) + 1 > MAX_FIELD_LENGTH or
+                    len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+                break
+
+            field_title += column_title + "\n"
+            field_year_tags += column_year_tags + "\n"
+            field_rating += column_rating + "\n"
+            i += 1
+
+    if not result_movies:
         description = "Nie znaleziono pasujących wyników."
         embed = construct_embedded_message(title=title, description=description)
         await user_message.delete()
         await bot_message.edit(embed=embed)
         return
 
-    # Make description
-    description = "**Znalezione wyniki:**\n\n"
-    field_title = ''
-    field_year_tags = ''
-    field_rating = ''
-
-    for i, movie in enumerate(movies):
-        m_title = movie.title
-        m_year = movie.year
-        m_tags = movie.tags
-        m_rating = movie.rating
-
-        # Split removes alternative titles
-        column_title = f"{i + 1}\. {m_title.split('/')[0]}"
-        column_year_tags = f"{m_year}\u2003{m_tags}"
-        column_rating = f"{m_rating}"
-
-        # Limit Row Width
-        if len(column_title) >= 37:
-            column_title = column_title[:34] + "..."
-        if len(column_year_tags) >= 26:
-            column_year_tags = column_year_tags[:23].rstrip(",") + "..."
-
-        # Check field length limit
-        if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
-                len(field_year_tags) + len(field_year_tags) + 1 > MAX_FIELD_LENGTH or
-                len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
-            break
-
-        field_title += column_title + "\n"
-        field_year_tags += column_year_tags + "\n"
-        field_rating += column_rating + "\n"
-
     # Send embedded message
     embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
                                        description=description)
     # Update User
-    user.search_content = movies
+    user.search_content = result_movies
 
     # Delete User message, Edit Bot message
     await user_message.delete()
