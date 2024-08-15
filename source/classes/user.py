@@ -14,7 +14,7 @@ class User:
         self.name: str = member.name
         self.display_name: str = member.display_name
         self.state: UserState = UserState.idle
-        self.search_content: List[Movie] = []
+        self.movie_selection_list: List[Movie] = []
         self.message_id: int = 0
         self.watchlist: Watchlist = Watchlist(self)
 

@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
+from typing import Optional, Callable, List, Dict
 
 import discord
 from discord import Message
@@ -13,16 +14,17 @@ import logging
 
 from source.classes.enums import UserState
 from source.classes.user import User
+from source.classes.watchlist import MovieEntry
 
 # Logging
 # Set up the log file handler to rotate daily
 log_file_handler = TimedRotatingFileHandler(
-    filename='logs/logfile.log',   # Active log file
-    when='midnight',               # When to rotate
-    interval=1,                    # Interval for rotation
-    backupCount=10000,             # Number of backup files to keep
-    encoding='utf-8',              # Encoding of the log file
-    utc=False                      # UTC or local time
+    filename='logs/logfile.log',  # Active log file
+    when='midnight',  # When to rotate
+    interval=1,  # Interval for rotation
+    backupCount=10000,  # Number of backup files to keep
+    encoding='utf-8',  # Encoding of the log file
+    utc=False  # UTC or local time
 )
 # Set up logging configuration
 logging.basicConfig(
@@ -62,11 +64,11 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 # Constants
 TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
 USERS_PATH = "data/users"
-MAX_ROWS_SEARCH = 12  # max number of rows showed in movie search
-MAX_ROWS_WATCHLIST = 20  # max number of rows showed in watchlist
-MAX_FIELD_LENGTH = 1024  # max length of the embed fields (up to 1024 characters limited by Discord)
-MIN_MATCH_SCORE = 40  # minimum score of similarity in the search(0-100)
-
+MAX_ROWS_SEARCH = 12  # Max number of rows showed in movie search
+MAX_ROWS_WATCHLIST = 3  # Max number of rows showed in watchlist
+MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
+MIN_MATCH_SCORE = 40  # Minimum score of similarity in the search(0-100)
+REACTION_TIMEOUT = 600.0  # Time in seconds for bot to track reactions
 
 # Global Bot values
 bot.g_locked = False
@@ -128,47 +130,59 @@ async def watchlist(ctx: Context) -> None:
 
 @bot.event
 async def on_message(message: Message) -> None:
+    """Main message event handler."""
     if (
-            not bot.g_locked
-            and message.channel.id in TEXT_CHANNELS
-            and is_user(message.author.id)
-            and not message.content.startswith(tuple(bot.command_prefix))
+            bot.g_locked
+            or message.channel.id not in TEXT_CHANNELS
+            or not is_user(message.author.id)
+            or message.content.startswith(tuple(bot.command_prefix))
     ):
-        # Ignore bot's own messages
-        if message.author == bot.user:
-            return
+        await bot.process_commands(message)
+        return
 
-        user = get_user(message.author.id)
+    # Ignore bot's own messages
+    if message.author == bot.user:
+        return
 
-        # Handle User State
-        if user.state in {UserState.search_panel, UserState.search_result}:
-            if message.content.isnumeric() and int(message.content) in range(1, len(user.search_content) + 1):
-                user.state = UserState.movie_details
-            else:
-                user.state = UserState.search_result
-
-            state = user.state
-
-            # Function mappings
-            state_functions = {
-                UserState.search_result: search_result,
-                UserState.movie_details: movie_details,
-            }
-            handler = state_functions.get(state, None)
-
-            if handler:
-                # Find bot message
-                try:
-                    fetched_message = await message.channel.fetch_message(user.message_id)
-                    logging.info(f"[main.py]: Message found ({str(message.channel)})")
-                    await handler(message, fetched_message)
-                except discord.HTTPException as err:
-                    logging.warning(f"[main.py]: Error fetching message ({message.channel}): {err}")
-                    user.state = UserState.idle
-            else:
-                logging.warning(f"[main.py]: Unknown UserState: {state}")
+    user = get_user(message.author.id)
+    await handle_user_input(message, user)
+    await execute_state_handler(message, user)
 
     await bot.process_commands(message)
+
+
+async def handle_user_input(message: Message, user) -> None:
+    """Handles user input based on the user's current state."""
+    old_state = user.state
+    if message.content.isnumeric():  # Numeric
+        user.state = UserState.movie_details
+    else:  # Not numeric
+        if old_state != UserState.watchlist_panel:
+            user.state = UserState.search_result
+    logging.debug(f"Input: '{message.content}', Old State: {old_state}, New state: {user.state}")
+
+
+async def execute_state_handler(message: Message, user) -> None:
+    """Executes the function corresponding to the user's current state."""
+    state_functions = {
+        UserState.search_result: search_result,
+        UserState.movie_details: movie_details,
+    }
+    if user.state == UserState.watchlist_panel:
+        return
+
+    handler = state_functions.get(user.state)
+    if not handler:
+        logging.warning(f"[main.py]: Unknown UserState: {user.state}")
+        return
+
+    try:
+        fetched_message = await message.channel.fetch_message(user.message_id)
+        logging.info(f"Running handler: {handler.__name__}, Channel: '{str(message.channel)}'")
+        await handler(message, fetched_message)
+    except discord.HTTPException as err:
+        logging.warning(f"[main.py]: Error fetching message ({message.channel}): {err}")
+        user.state = UserState.idle
 
 
 async def search_panel(user_message: Message) -> None:
@@ -235,14 +249,14 @@ async def search_panel(user_message: Message) -> None:
         return
 
     # Send embedded message
-    embed = construct_embedded_message(field_title, field_year_tags, field_rating,  title=title,
+    embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
                                        description=description)
     msg = await user_message.channel.send(embed=embed)
 
     # Update User
     user.message_id = msg.id
     user.state = UserState.search_panel
-    user.search_content = result_movies
+    user.movie_selection_list = result_movies
 
 
 async def search_result(user_message: Message, bot_message: Message) -> None:
@@ -310,7 +324,7 @@ async def search_result(user_message: Message, bot_message: Message) -> None:
     embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
                                        description=description)
     # Update User
-    user.search_content = result_movies
+    user.movie_selection_list = result_movies
 
     # Delete User message, Edit Bot message
     await user_message.delete()
@@ -319,12 +333,15 @@ async def search_result(user_message: Message, bot_message: Message) -> None:
 
 async def movie_details(user_message: Message, bot_message: Message) -> None:
     """Individual movie panel"""
+    add_to_watchlist_emoji = '📥'
+    remove_from_watchlist_emoji = '📤'
+
     user = get_user(user_message.author.id)
 
     if not user:
         title = "Wyszukiwarka filmów (Brak użytkownika)"
         description = "**Użytkownik nie istnieje.**\n\n"
-        embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
+        embed = construct_embedded_message(title=title, description=description)
         await user_message.delete()
         await bot_message.edit(embed=embed)
         return
@@ -332,14 +349,14 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     title = f"Wyszukiwarka filmów ({user.display_name})"
     input_int = int(user_message.content)
 
-    if input_int not in range(1, len(user.search_content) + 1):
+    if input_int not in range(1, len(user.movie_selection_list) + 1):
         description = "**Wprowadzono liczbę poza zakresem.**\n\n"
-        embed = construct_embedded_message(title=title, description=description, footer='(w - wróć)')
+        embed = construct_embedded_message(title=title, description=description)
         await user_message.delete()
         await bot_message.edit(embed=embed)
         return
 
-    selected_movie = user.search_content[input_int - 1]
+    selected_movie = user.movie_selection_list[input_int - 1]
 
     description = (
         f"**{selected_movie.year}r\u2004|\u2004{selected_movie.length}min\u2004|\u2004{selected_movie.tags}**\n\n"
@@ -352,70 +369,165 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     )
 
     # Make embedded message
-    embed = construct_embedded_message(title=selected_movie.title, description=description, footer='(w - wróć)')
-
-    # Set Embed's image
+    embed = construct_embedded_message(title=selected_movie.title, description=description)
     embed.set_image(url=selected_movie.image_link)
 
-    # Delete User message, Edit Bot message
+    # Prepare reaction emojis
+    if user.watchlist.has_movie(selected_movie):
+        emoji_to_text = {remove_from_watchlist_emoji: "Usuń z listy filmów"}
+    else:
+        emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
+
+    # Set footer, Delete User message, Edit Bot message
+    footer_text = make_footer(emoji_to_text)
+    embed.set_footer(text=footer_text)
     await user_message.delete()
-    await bot_message.edit(embed=embed)
+    msg = await bot_message.edit(embed=embed)
+
+    # Waiting for user reaction and updating message
+    while True:
+        payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
+        if payload is None:
+            return
+        selected_emoji = str(payload.emoji)
+
+        # Change the status of the movie on the watchlist and update the footer
+        if selected_emoji == add_to_watchlist_emoji:
+            user.watchlist.add_movie(selected_movie)
+            emoji_to_text = {remove_from_watchlist_emoji: "Usuń z listy filmów"}
+        elif selected_emoji == remove_from_watchlist_emoji:
+            user.watchlist.remove_movie(selected_movie)
+            emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
+
+        # Update message
+        footer_text = make_footer(emoji_to_text)
+        embed.set_footer(text=footer_text)
+        await msg.edit(embed=embed)
 
 
-async def watchlist_panel(user_message: Message) -> None:
+async def watchlist_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
     """Main panel of search engine"""
     ctx = await bot.get_context(user_message)
     user = get_user(ctx.author.id)
-    title = f"Lista filmów użytkownika {user.display_name}"
+    title = f"Lista filmów ({user.display_name})"
     entries = user.watchlist.get_entries_sorted_by_title()
+    entries_count = len(entries)
 
     if not entries:
         description = "**Twoja lista jest pusta.**\n" \
                       "Skorzystaj z komendy **m.szukaj**, aby wyszukać i dodać wybrane przez siebie filmy."
-        embed = construct_embedded_message(title=title, description=description)
+        embed = construct_embedded_message(title=title, description=description, colour=0xdfc118)
         # Send embedded message
         await user_message.channel.send(embed=embed)
         return
 
-    # Make description
-    field_title = 'Tytuł\n'
-    field_date = 'Data dodania\n'
-    field_rating = 'Ocena\n'
-    for i, entry in enumerate(entries):
-        e_title = entry.movie.title
-        e_date = entry.date_added
-        e_rating = entry.rating
+    def make_embed(page_entries: List[MovieEntry], page_number: int) -> discord.Embed:
+        field_title = 'Tytuł\n'
+        field_date = 'Data dodania\n'
+        field_rating = 'Ocena\n'
+        for i, entry in enumerate(page_entries):
+            e_title = entry.movie.title
+            e_date = entry.date_added
+            e_rating = entry.rating
+            e_number = i + 1 + (page_number - 1) * MAX_ROWS_WATCHLIST
 
-        # Split removes alternative titles
-        column_title = f"{i + 1}\. {e_title}"
-        column_date = f"{e_date}"
-        column_rating = f"{e_rating}"
+            column_title = f"{e_number}\. {e_title}"
+            column_date = f"{e_date}"
+            column_rating = f"{e_rating}"
 
-        # Limit Row Width
-        if len(column_title) >= 53:
-            column_title = column_title[:50] + "..."
+            if len(column_title) >= 51:
+                column_title = column_title[:48] + "..."
 
-        # Check field length limit
-        if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
-                len(field_date) + len(column_date) + 1 > MAX_FIELD_LENGTH or
-                len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
-            break
+            if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                    len(field_date) + len(column_date) + 1 > MAX_FIELD_LENGTH or
+                    len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+                break
 
-        field_title += column_title + "\n"
-        field_date += column_date + "\n"
-        field_rating += column_rating + "\n"
+            field_title += column_title + "\n"
+            field_date += column_date + "\n"
+            field_rating += column_rating + "\n"
 
-    description = ""
-    embed = construct_embedded_message(field_title, field_date, field_rating,  title=title,
-                                       description=description)
+        desc = f"Strona {page_number} z {pages_count}"
+        emb = construct_embedded_message(field_title, field_date, field_rating, title=title,
+                                         description=desc, colour=0xdfc118)
+        return emb
 
-    # Send embedded message
-    msg = await user_message.channel.send(embed=embed)
+    pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, entries_count, MAX_ROWS_WATCHLIST)]
+    pages_count = len(pages)
+    current_page = 1
+    msg = None  # Initialize the message variable
 
-    # Update User
-    user.message_id = msg.id
-    user.state = UserState.watchlist_panel
-    user.search_content = [e.movie for e in entries]
+    while True:  # List menu
+        # Prepare emojis based on the current page
+        emoji_to_text = {}
+        if pages_count > 1:
+            if current_page > 1:
+                emoji_to_text['⬅️'] = "Wstecz"
+            if current_page < pages_count:
+                emoji_to_text['➡️'] = "Dalej"
+
+        # Make embed and footer
+        embed = make_embed(pages[current_page - 1], current_page)
+        footer = make_footer(emoji_to_text)
+        embed.set_footer(text=footer)
+
+        if msg is None:  # If it's the first time, send a new message
+            msg = await user_message.channel.send(embed=embed)
+            user.state = UserState.watchlist_panel
+            user.message_id = msg.id
+            user.movie_selection_list = [e.movie for e in entries]
+        else:  # Otherwise, edit the existing message
+            await msg.edit(embed=embed)
+
+        # Get User reaction emoji
+        payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
+        if payload is None:
+            return
+
+        selected_emoji = str(payload.emoji)
+
+        # Change page
+        if selected_emoji == '⬅️' and current_page > 1:  # Previous
+            current_page -= 1
+        elif selected_emoji == '➡️' and current_page < pages_count:  # Next
+            current_page += 1
+
+
+async def get_user_reaction(
+        message: discord.Message,
+        emojis: List[str],
+        controller: Optional[User] = None,
+        timeout: Optional[float] = None,
+        check: Callable[[discord.MessageInteraction], bool] | None = None
+) -> Optional[discord.RawReactionActionEvent]:
+    # Update reactions. Adding reaction individually takes a lot of time.
+    if (controller and len(emojis) <= 4) or not emojis:
+        # UPDATE THE REACTIONS
+        if message.channel.type != discord.ChannelType.private:
+            await message.clear_reactions()
+        for e in emojis:
+            await message.add_reaction(e)
+
+    # CONDITIONS CHECK (1.user, 2.message, 3.emoji)
+    def check_default(payload: discord.RawReactionActionEvent):
+        user_id, msg_id, emoji = payload.user_id, payload.message_id, str(payload.emoji)
+        id_list = [p.id for p in bot.g_users]
+        return (
+                (user_id == controller.id if controller else user_id in id_list)  # 1
+                and (msg_id == message.id)  # 2
+                and (emoji in emojis)  # 3
+        )
+
+    # WAIT FOR THE REACTION INPUT
+    try:
+        reaction_payload = await bot.wait_for(
+            "raw_reaction_add",
+            check=check if check is not None else check_default,
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        return None
+    return reaction_payload
 
 
 def is_user(user_id: int):
@@ -440,6 +552,12 @@ def construct_embedded_message(*fields: str, title: str = '', description: str =
         embed.add_field(name="", value=f, inline=True)
     embed.set_footer(text=footer)
     return embed
+
+
+def make_footer(emoji_mapping: Dict[str, str]) -> str:
+    """Creates a footer string from emoji-to-text mapping."""
+    footer_parts = [f"{emoji} {text}" for emoji, text in emoji_mapping.items()]
+    return " | ".join(footer_parts)
 
 
 bot.run(TOKEN)

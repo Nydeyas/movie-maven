@@ -20,7 +20,7 @@ class Watchlist:
         return f"{cls_name}(entries={len(self.entries)} movies)"
 
     def add_movie(self, movie: Movie, rating: Optional[float] = None):
-        if any(entry.movie == movie for entry in self.entries):
+        if self.has_movie(movie):
             logging.warning(f"Movie '{movie.title}' already exists in the watchlist entries. {repr(self.user)}.")
             return
 
@@ -29,6 +29,10 @@ class Watchlist:
 
     def remove_movie(self, movie: Movie):
         self.entries = [entry for entry in self.entries if entry.movie != movie]
+
+    def has_movie(self, movie: Movie) -> bool:
+        """Check if the movie is in the watchlist."""
+        return any(entry.movie == movie for entry in self.entries)
 
     def update_rating(self, movie: Movie, new_rating: float):
         for entry in self.entries:
