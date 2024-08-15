@@ -1,11 +1,12 @@
 from source.to_thread import to_thread
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from datetime import datetime
 from typing import List
 import re
 from source.classes.types_base import Movie as MoviePayload
 import logging
+from seleniumbase import Driver
+
 
 def find_first_number(text: str) -> str:
     """Finds the first number in the text."""
@@ -19,13 +20,11 @@ def find_last_number(text: str) -> str:
 
 @to_thread
 def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List[MoviePayload]:
-    options = webdriver.FirefoxOptions()
-    options.add_argument('-headless')
-    browser = webdriver.Firefox(options=options)
+    browser = Driver(uc=True, headless=True)
     a = datetime.now()
-
     try:
         browser.get(f'{site_link}/page/1/')
+        browser.sleep(2)
         element_last_page = browser.find_element(By.LINK_TEXT, value="Ostatnia")
         href_last_page = element_last_page.get_attribute("href")
     except Exception as e:
@@ -49,7 +48,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
                 # Page with movies
                 logging.info(f"Page: {page_number}/{pages_count}...")
 
-                browser.get(f'{site_link}/page/{page_number}/')
+                browser.default_get(f'{site_link}/page/{page_number}/')
 
                 sector = browser.find_element(By.CLASS_NAME, "item_1")
                 elements = sector.find_elements(By.CLASS_NAME, "item")
@@ -57,7 +56,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
 
                 for h in hrefs:
                     # Movie url
-                    browser.get(h)
+                    browser.default_get(h)
 
                     # XPATH - faster than CSS Selector
                     obj = browser.find_element(By.XPATH, value="//*[@id='uwee']")
