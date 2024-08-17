@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from typing import Optional, Callable, List, Dict
@@ -28,7 +29,7 @@ log_file_handler = TimedRotatingFileHandler(
 )
 # Set up logging configuration
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         log_file_handler,
@@ -65,7 +66,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
 USERS_PATH = "data/users"
 MAX_ROWS_SEARCH = 12  # Max number of rows showed in movie search
-MAX_ROWS_WATCHLIST = 3  # Max number of rows showed in watchlist
+MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
 MIN_MATCH_SCORE = 40  # Minimum score of similarity in the search(0-100)
 REACTION_TIMEOUT = 600.0  # Time in seconds for bot to track reactions
@@ -102,7 +103,8 @@ async def update_site_data() -> None:
 async def save_user_data() -> None:
     z1 = datetime.now()
 
-    collect_data.save_pkl(bot.g_users, f'{USERS_PATH}/users.pkl')
+    users_copy = [user.copy_without_task() for user in bot.g_users]
+    collect_data.save_pkl(users_copy, f'{USERS_PATH}/users.pkl')
 
     z2 = datetime.now()
     logging.info("save_user_data(): " + str(z2 - z1))
@@ -114,7 +116,7 @@ async def search(ctx: Context) -> None:
     if ctx.channel.id in TEXT_CHANNELS and not bot.g_locked:
         if not is_user(ctx.author.id):
             # Add new User
-            bot.g_users.append(User(ctx.author))
+            bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
         await search_panel(ctx.message)
 
 
@@ -124,7 +126,7 @@ async def watchlist(ctx: Context) -> None:
     if ctx.channel.id in TEXT_CHANNELS and not bot.g_locked:
         if not is_user(ctx.author.id):
             # Add new User
-            bot.g_users.append(User(ctx.author))
+            bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
         await watchlist_panel(ctx.message)
 
 
@@ -154,34 +156,45 @@ async def on_message(message: Message) -> None:
 async def handle_user_input(message: Message, user) -> None:
     """Handles user input based on the user's current state."""
     old_state = user.state
-    if message.content.isnumeric():  # Numeric
+    blacklist = [UserState.idle, UserState.rate_movie]
+
+    if old_state in blacklist:
+        logging.debug(f"Input: '{message.content}', Old State: '{old_state}' (blacklisted for user input)")
+        return
+
+    if message.content.isdecimal():  # Numeric
         user.state = UserState.movie_details
     else:  # Not numeric
         if old_state != UserState.watchlist_panel:
             user.state = UserState.search_result
-    logging.debug(f"Input: '{message.content}', Old State: {old_state}, New state: {user.state}")
+    logging.debug(f"Input: '{message.content}', Old State: '{old_state}', New state: '{user.state}'")
 
 
 async def execute_state_handler(message: Message, user) -> None:
     """Executes the function corresponding to the user's current state."""
     state_functions = {
+        UserState.search_panel: search_panel,
         UserState.search_result: search_result,
         UserState.movie_details: movie_details,
     }
-    if user.state == UserState.watchlist_panel:
+    blacklist = [UserState.idle, UserState.rate_movie, UserState.watchlist_panel]
+    state = user.state
+
+    if state in blacklist:
+        logging.debug(f"No handler was executed ('{state}' is blacklisted for handler )")
         return
 
-    handler = state_functions.get(user.state)
+    handler = state_functions.get(state)
     if not handler:
-        logging.warning(f"[main.py]: Unknown UserState: {user.state}")
+        logging.warning(f"Unknown UserState: {state}")
         return
 
     try:
         fetched_message = await message.channel.fetch_message(user.message_id)
-        logging.info(f"Running handler: {handler.__name__}, Channel: '{str(message.channel)}'")
+        logging.debug(f"Running handler: {handler.__name__}, Channel: '{str(message.channel)}'")
         await handler(message, fetched_message)
     except discord.HTTPException as err:
-        logging.warning(f"[main.py]: Error fetching message ({message.channel}): {err}")
+        logging.warning(f"Error fetching message ({message.channel}): {err}")
         user.state = UserState.idle
 
 
@@ -335,6 +348,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     """Individual movie panel"""
     add_to_watchlist_emoji = '📥'
     remove_from_watchlist_emoji = '📤'
+    rate_movie_emoji = '📊'
 
     user = get_user(user_message.author.id)
 
@@ -374,7 +388,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
 
     # Prepare reaction emojis
     if user.watchlist.has_movie(selected_movie):
-        emoji_to_text = {remove_from_watchlist_emoji: "Usuń z listy filmów"}
+        emoji_to_text = {remove_from_watchlist_emoji: "Usuń z listy filmów", rate_movie_emoji: "Oceń film"}
     else:
         emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
 
@@ -394,15 +408,57 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         # Change the status of the movie on the watchlist and update the footer
         if selected_emoji == add_to_watchlist_emoji:
             user.watchlist.add_movie(selected_movie)
-            emoji_to_text = {remove_from_watchlist_emoji: "Usuń z listy filmów"}
+            emoji_to_text = {remove_from_watchlist_emoji: "Usuń z listy filmów", rate_movie_emoji: "Oceń film"}
         elif selected_emoji == remove_from_watchlist_emoji:
             user.watchlist.remove_movie(selected_movie)
             emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
-
+        elif selected_emoji == rate_movie_emoji:
+            await rate_movie(user_message, bot_message)
+            time.sleep(2)
         # Update message
         footer_text = make_footer(emoji_to_text)
         embed.set_footer(text=footer_text)
         await msg.edit(embed=embed)
+
+
+async def rate_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
+    # Prompt user to enter rating
+    user = get_user(user_message.author.id)
+    user.state = UserState.rate_movie
+    input_int = int(user_message.content)
+    selected_movie = user.movie_selection_list[input_int - 1]
+
+    await bot_message.clear_reactions()
+    rating_prompt = "Wybierz ocenę filmu (1-10):"
+    rating_embed = construct_embedded_message(title="Oceń Film", description=rating_prompt)
+    await bot_message.edit(embed=rating_embed)
+
+    # Wait for user to enter a rating
+    response = await get_user_text(
+        user,
+        REACTION_TIMEOUT,
+        check=(
+            lambda m: m.author == user_message.author
+            and m.content.replace('.', '', 1).isdigit()
+            and 1 <= float(m.content) <= 10
+            and m.channel.id == bot_message.channel.id
+        )
+    )
+    if response is None:
+        timeout_description = "Czas na ocenę filmu upłynął."
+        rating_embed = construct_embedded_message(title="Oceń Film", description=timeout_description)
+        await bot_message.edit(embed=rating_embed)
+        return
+
+    # Update rating
+    new_rating = int(response.content) if response.content.isdigit() else round(float(response.content), 1)
+    user.watchlist.update_rating(selected_movie, new_rating)
+
+    # Confirm rating update
+    confirm_description = f"Film został oceniony na {new_rating}/10."
+    rating_embed = construct_embedded_message(title="Oceniono Film", description=confirm_description)
+    await response.delete()
+    await bot_message.edit(embed=rating_embed)
 
 
 async def watchlist_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
@@ -500,9 +556,8 @@ async def get_user_reaction(
         timeout: Optional[float] = None,
         check: Callable[[discord.MessageInteraction], bool] | None = None
 ) -> Optional[discord.RawReactionActionEvent]:
-    # Update reactions. Adding reaction individually takes a lot of time.
+    # Update reactions
     if (controller and len(emojis) <= 4) or not emojis:
-        # UPDATE THE REACTIONS
         if message.channel.type != discord.ChannelType.private:
             await message.clear_reactions()
         for e in emojis:
@@ -518,16 +573,61 @@ async def get_user_reaction(
                 and (emoji in emojis)  # 3
         )
 
-    # WAIT FOR THE REACTION INPUT
-    try:
-        reaction_payload = await bot.wait_for(
+    # Create and update user task
+    new_task = asyncio.create_task(bot.wait_for(
             "raw_reaction_add",
-            check=check if check is not None else check_default,
-            timeout=timeout
+            timeout=timeout,
+            check=check if check is not None else check_default
         )
-    except asyncio.TimeoutError:
+    )
+    if controller:
+        old_task = controller.interaction_task
+        if old_task and not old_task.done():
+            logging.debug(f"Cancelling task: name={old_task.get_name()}")
+            old_task.cancel()
+        controller.interaction_task = new_task
+
+    # Wait for the reaction
+    try:
+        reaction_payload = await new_task
+    except asyncio.TimeoutError as e:
+        logging.debug(f"Wait for reaction timeout: {e}")
         return None
     return reaction_payload
+
+
+async def get_user_text(
+        controller: Optional[User] = None,
+        timeout: Optional[float] = None,
+        check: Callable[[discord.MessageInteraction], bool] | None = None
+) -> Optional[discord.Message]:
+
+    # CONDITIONS CHECK (1.user, 2.message)
+    def check_default(message: discord.Message):
+        user_id = message.author.id
+        id_list = [p.id for p in bot.g_users]
+        return(user_id == controller.id if controller else user_id in id_list) and (message.channel.id in TEXT_CHANNELS)
+
+    # Create and update user task
+    new_task = asyncio.create_task(bot.wait_for(
+            'message',
+            timeout=timeout,
+            check=check if check is not None else check_default
+        )
+    )
+    if controller:
+        old_task = controller.interaction_task
+        if old_task and not old_task.done():
+            logging.debug(f"Cancelling task: name={old_task.get_name()}")
+            old_task.cancel()
+        controller.interaction_task = new_task
+
+    # Wait for the text
+    try:
+        message_payload = await new_task
+    except asyncio.TimeoutError:
+        return None
+    return message_payload
 
 
 def is_user(user_id: int):
