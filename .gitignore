@@ -10,6 +10,9 @@ __pycache__/
 *.log
 logs/
 
+# Selenium files
+downloaded_files/
+
 #Pycharm files
 .idea/
 
