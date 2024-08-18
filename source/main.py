@@ -415,6 +415,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         elif selected_emoji == rate_movie_emoji:
             await rate_movie(user_message, bot_message)
             time.sleep(2)
+            user.state = UserState.movie_details
         # Update message
         footer_text = make_footer(emoji_to_text)
         embed.set_footer(text=footer_text)
@@ -462,37 +463,60 @@ async def rate_movie(user_message: Message, bot_message: Optional[Message] = Non
 
 
 async def watchlist_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
-    """Main panel of search engine"""
+    """Main panel of the watchlist with sorting and pagination"""
+    # Emojis
+    emoji_previous_page = '⬅'
+    emoji_next_page = '➡'
+    emoji_sort = '🔀'
+    emoji_sort_exit = '🆗'
+    emoji_sort_by_title = '🆎'
+    emoji_sort_by_date_added = '📅'
+    emoji_sort_by_rating = '💟'
+    emoji_sort_descending = '↘️'
+    emoji_sort_ascending = '↗️'
+
     ctx = await bot.get_context(user_message)
     user = get_user(ctx.author.id)
     title = f"Lista filmów ({user.display_name})"
-    entries = user.watchlist.get_entries_sorted_by_title()
-    entries_count = len(entries)
 
-    if not entries:
-        description = "**Twoja lista jest pusta.**\n" \
-                      "Skorzystaj z komendy **m.szukaj**, aby wyszukać i dodać wybrane przez siebie filmy."
-        embed = construct_embedded_message(title=title, description=description, colour=0xdfc118)
-        # Send embedded message
-        await user_message.channel.send(embed=embed)
-        return
+    def update_entries():
+        """Update entries based on the current sort key and order"""
+        nonlocal entries
+        if sort_key == 'title':
+            entries = user.watchlist.get_entries_sorted_by_title(reverse=(sort_order == 'desc'))
+        elif sort_key == 'date_added':
+            entries = user.watchlist.get_entries_sorted_by_date(reverse=(sort_order == 'desc'))
+        elif sort_key == 'rating':
+            entries = user.watchlist.get_entries_sorted_by_rating(reverse=(sort_order == 'desc'))
 
-    def make_embed(page_entries: List[MovieEntry], page_number: int) -> discord.Embed:
+    def make_embed(page_entries: List[MovieEntry], page_number: int, show_sorting_info: bool = False) -> discord.Embed:
+        # Generate the sorting description if requested
+        if show_sorting_info:
+            sort_criteria = {
+                'title': 'Tytuł',
+                'date_added': 'Data dodania',
+                'rating': 'Ocena'
+            }
+            order = 'malejąco' if sort_order == 'desc' else 'rosnąco'
+            sorting_info = f"**Sortowanie: {sort_criteria[sort_key]} ({order})**"
+        else:
+            sorting_info = ""
+
         field_title = 'Tytuł\n'
         field_date = 'Data dodania\n'
         field_rating = 'Ocena\n'
         for i, entry in enumerate(page_entries):
             e_title = entry.movie.title
             e_date = entry.date_added
-            e_rating = entry.rating
+            e_rating = '\u200B' if entry.rating is None else entry.rating
             e_number = i + 1 + (page_number - 1) * MAX_ROWS_WATCHLIST
 
             column_title = f"{e_number}\. {e_title}"
             column_date = f"{e_date}"
             column_rating = f"{e_rating}"
 
-            if len(column_title) >= 51:
-                column_title = column_title[:48] + "..."
+            if len(column_title) >= 50:
+                column_title = column_title[:47] + "..."
 
             if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
                     len(field_date) + len(column_date) + 1 > MAX_FIELD_LENGTH or
@@ -503,24 +527,29 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
             field_date += column_date + "\n"
             field_rating += column_rating + "\n"
 
-        desc = f"Strona {page_number} z {pages_count}"
+        desc = f"Strona {page_number} z {pages_count}\n{sorting_info}"
         emb = construct_embedded_message(field_title, field_date, field_rating, title=title,
                                          description=desc, colour=0xdfc118)
         return emb
 
+    entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
+    entries_count = len(entries)
     pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, entries_count, MAX_ROWS_WATCHLIST)]
     pages_count = len(pages)
     current_page = 1
+    sort_order = 'asc'  # Default sorting order
+    sort_key = 'title'  # Default sorting key
     msg = None  # Initialize the message variable
 
-    while True:  # List menu
+    while True:  # Main loop
         # Prepare emojis based on the current page
         emoji_to_text = {}
         if pages_count > 1:
             if current_page > 1:
-                emoji_to_text['⬅️'] = "Wstecz"
+                emoji_to_text[emoji_previous_page] = "Wstecz"
             if current_page < pages_count:
-                emoji_to_text['➡️'] = "Dalej"
+                emoji_to_text[emoji_next_page] = "Dalej"
+        emoji_to_text[emoji_sort] = "Sortuj"
 
         # Make embed and footer
         embed = make_embed(pages[current_page - 1], current_page)
@@ -542,12 +571,67 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
 
         selected_emoji = str(payload.emoji)
 
-        # Change page
-        if selected_emoji == '⬅️' and current_page > 1:  # Previous
+        if selected_emoji == emoji_previous_page and current_page > 1:  # Previous
             current_page -= 1
-        elif selected_emoji == '➡️' and current_page < pages_count:  # Next
+        elif selected_emoji == emoji_next_page and current_page < pages_count:  # Next
             current_page += 1
+        elif selected_emoji == emoji_sort:  # Sort
+            while True:
+                sort_options = {
+                    'title': {emoji_sort_by_date_added: "Sortuj po Dacie dodania",
+                              emoji_sort_by_rating: "Sortuj po Ocenie"},
+                    'date_added': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_rating: "Sortuj po Ocenie"},
+                    'rating': {emoji_sort_by_title: "Sortuj po Tytule",
+                               emoji_sort_by_date_added: "Sortuj po Dacie dodania"}
+                }
+                emoji_to_text = sort_options.get(sort_key, {})
+                # Show sorting options
+                if sort_order == 'asc':
+                    emoji_to_text[emoji_sort_descending] = "Sortuj malejąco"
+                else:
+                    emoji_to_text[emoji_sort_ascending] = "Sortuj rosnąco"
+                emoji_to_text[emoji_sort_exit] = "Akceptuj"
 
+                # Make embed and footer
+                embed = make_embed(pages[current_page - 1], current_page, show_sorting_info=True)
+                footer = make_footer(emoji_to_text)
+                embed.set_footer(text=footer)
+
+                # Send updated embed with new sorting
+                await msg.edit(embed=embed)
+
+                sort_payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
+                if sort_payload is None:
+                    return
+
+                sort_selected_emoji = str(sort_payload.emoji)
+
+                if sort_selected_emoji == emoji_sort_by_title:
+                    sort_key = 'title'
+                    update_entries()
+                elif sort_selected_emoji == emoji_sort_by_date_added:
+                    sort_key = 'date_added'
+                    update_entries()
+                elif sort_selected_emoji == emoji_sort_by_rating:
+                    sort_key = 'rating'
+                    update_entries()
+                elif sort_selected_emoji == emoji_sort_descending:
+                    sort_order = 'desc'
+                    update_entries()
+                elif sort_selected_emoji == emoji_sort_ascending:
+                    sort_order = 'asc'
+                    update_entries()
+                elif sort_selected_emoji == emoji_sort_exit:
+                    break  # Exit the sorting menu
+
+                # Update pages and page count
+                pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, len(entries), MAX_ROWS_WATCHLIST)]
+                pages_count = len(pages)
+                current_page = 1  # Reset to the first page
+
+        # Update message after page change
+        embed = make_embed(pages[current_page - 1], current_page)
+        await msg.edit(embed=embed)
 
 async def get_user_reaction(
         message: discord.Message,
@@ -557,7 +641,7 @@ async def get_user_reaction(
         check: Callable[[discord.MessageInteraction], bool] | None = None
 ) -> Optional[discord.RawReactionActionEvent]:
     # Update reactions
-    if (controller and len(emojis) <= 4) or not emojis:
+    if controller or not emojis:
         if message.channel.type != discord.ChannelType.private:
             await message.clear_reactions()
         for e in emojis:

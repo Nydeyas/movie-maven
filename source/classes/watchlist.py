@@ -3,11 +3,16 @@ from __future__ import annotations
 from datetime import date
 from typing import List, TYPE_CHECKING, Optional
 import logging
+import locale
 
 from source.classes.movie import Movie
 
 if TYPE_CHECKING:
     from source.classes.user import User
+
+
+def replace_none(value, default=0):
+    return default if value is None else value
 
 
 class Watchlist:
@@ -41,16 +46,37 @@ class Watchlist:
                 break
 
     def get_entries_sorted_by_title(self, max_items: Optional[int] = None, reverse: bool = False) -> List[MovieEntry]:
-        sorted_entries = sorted(self.entries, key=lambda e: e.movie.title, reverse=reverse)
+        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
+        sorted_entries = sorted(self.entries, key=lambda e: locale.strxfrm(e.movie.title), reverse=reverse)
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 
     def get_entries_sorted_by_date(self, max_items: Optional[int] = None, reverse: bool = False) -> List[MovieEntry]:
-        sorted_entries = sorted(self.entries, key=lambda e: e.date_added, reverse=reverse)
+        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
+        sorted_entries = sorted(
+            self.entries,
+            key=lambda e: (
+                (e.date_added, locale.strxfrm(e.movie.title))
+                if not reverse
+                else (-e.date_added.toordinal(), locale.strxfrm(e.movie.title))
+            ),
+            reverse=False  # Always sort by the primary key as adjusted
+        )
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 
     def get_entries_sorted_by_rating(self, max_items: Optional[int] = None, reverse: bool = False) -> List[MovieEntry]:
-        sorted_entries = sorted(self.entries, key=lambda e: e.rating or 0, reverse=reverse)
+        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
+        sorted_entries = sorted(
+            self.entries,
+            key=(
+                lambda e: (replace_none(e.rating), locale.strxfrm(e.movie.title))
+                if not reverse
+                else (-replace_none(e.rating), locale.strxfrm(e.movie.title))
+            ),
+            reverse=False  # Always sort by the primary key as adjusted
+        )
+
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
+
 
     def get_movies(self, max_items: Optional[int] = None) -> List[Movie]:
         movies = [entry.movie for entry in self.entries]
