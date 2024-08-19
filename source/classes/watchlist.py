@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 from typing import List, TYPE_CHECKING, Optional
 import logging
@@ -93,6 +95,37 @@ class Watchlist:
     def get_movies_sorted_by_rating(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         sorted_entries = self.get_entries_sorted_by_rating(max_items, reverse)
         return [entry.movie for entry in sorted_entries]
+
+    def get_csv(self, sort_key: str = 'title', reverse: bool = False) -> io.BytesIO:
+        # Sort the entries based on the provided key and order
+        if sort_key == 'title':
+            sorted_entries = self.get_entries_sorted_by_title(reverse=reverse)
+        elif sort_key == 'date_added':
+            sorted_entries = self.get_entries_sorted_by_date(reverse=reverse)
+        elif sort_key == 'rating':
+            sorted_entries = self.get_entries_sorted_by_rating(reverse=reverse)
+        else:
+            sorted_entries = self.entries
+            logging.warning(f"Unknown sort_key '{sort_key}' provided. Using unsorted entries.")
+
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';')
+
+        # Write CSV header
+        writer.writerow(['Tytuł', 'Data dodania', 'Ocena'])
+
+        # Write data rows
+        for entry in sorted_entries:
+            title = entry.movie.title
+            date_added = entry.date_added
+            rating = entry.rating if entry.rating is not None else 'Brak'
+            writer.writerow([title, date_added, rating])
+
+        # Convert the StringIO to BytesIO
+        output.seek(0)
+        byte_io = io.BytesIO(output.getvalue().encode('utf-8'))
+        byte_io.seek(0)
+        return byte_io
 
 
 class MovieEntry:

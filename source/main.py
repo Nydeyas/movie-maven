@@ -5,7 +5,7 @@ from logging.handlers import TimedRotatingFileHandler
 from typing import Optional, Callable, List, Dict
 
 import discord
-from discord import Message
+from discord import Message, File
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 import os
@@ -468,12 +468,13 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     emoji_previous_page = '⬅'
     emoji_next_page = '➡'
     emoji_sort = '🔀'
+    emoji_download = '🧾'
     emoji_sort_exit = '🆗'
     emoji_sort_by_title = '🆎'
     emoji_sort_by_date_added = '📅'
-    emoji_sort_by_rating = '💟'
-    emoji_sort_descending = '↘️'
-    emoji_sort_ascending = '↗️'
+    emoji_sort_by_rating = '📊'
+    emoji_sort_descending = '📉'
+    emoji_sort_ascending = '📈'
 
     ctx = await bot.get_context(user_message)
     user = get_user(ctx.author.id)
@@ -483,11 +484,11 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
         """Update entries based on the current sort key and order"""
         nonlocal entries
         if sort_key == 'title':
-            entries = user.watchlist.get_entries_sorted_by_title(reverse=(sort_order == 'desc'))
+            entries = user.watchlist.get_entries_sorted_by_title(reverse=not sort_ascending)
         elif sort_key == 'date_added':
-            entries = user.watchlist.get_entries_sorted_by_date(reverse=(sort_order == 'desc'))
+            entries = user.watchlist.get_entries_sorted_by_date(reverse=not sort_ascending)
         elif sort_key == 'rating':
-            entries = user.watchlist.get_entries_sorted_by_rating(reverse=(sort_order == 'desc'))
+            entries = user.watchlist.get_entries_sorted_by_rating(reverse=not sort_ascending)
 
     def make_embed(page_entries: List[MovieEntry], page_number: int, show_sorting_info: bool = False) -> discord.Embed:
         # Generate the sorting description if requested
@@ -497,7 +498,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                 'date_added': 'Data dodania',
                 'rating': 'Ocena'
             }
-            order = 'malejąco' if sort_order == 'desc' else 'rosnąco'
+            order = 'rosnąco' if sort_ascending else 'malejąco'
             sorting_info = f"**Sortowanie: {sort_criteria[sort_key]} ({order})**"
         else:
             sorting_info = ""
@@ -537,7 +538,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, entries_count, MAX_ROWS_WATCHLIST)]
     pages_count = len(pages)
     current_page = 1
-    sort_order = 'asc'  # Default sorting order
+    sort_ascending = True  # Default sorting order
     sort_key = 'title'  # Default sorting key
     msg = None  # Initialize the message variable
 
@@ -550,6 +551,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
             if current_page < pages_count:
                 emoji_to_text[emoji_next_page] = "Dalej"
         emoji_to_text[emoji_sort] = "Sortuj"
+        emoji_to_text[emoji_download] = "Pobierz listę"
 
         # Make embed and footer
         embed = make_embed(pages[current_page - 1], current_page)
@@ -586,7 +588,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                 }
                 emoji_to_text = sort_options.get(sort_key, {})
                 # Show sorting options
-                if sort_order == 'asc':
+                if sort_ascending:
                     emoji_to_text[emoji_sort_descending] = "Sortuj malejąco"
                 else:
                     emoji_to_text[emoji_sort_ascending] = "Sortuj rosnąco"
@@ -616,10 +618,10 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                     sort_key = 'rating'
                     update_entries()
                 elif sort_selected_emoji == emoji_sort_descending:
-                    sort_order = 'desc'
+                    sort_ascending = False
                     update_entries()
                 elif sort_selected_emoji == emoji_sort_ascending:
-                    sort_order = 'asc'
+                    sort_ascending = True
                     update_entries()
                 elif sort_selected_emoji == emoji_sort_exit:
                     break  # Exit the sorting menu
@@ -628,10 +630,21 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                 pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, len(entries), MAX_ROWS_WATCHLIST)]
                 pages_count = len(pages)
                 current_page = 1  # Reset to the first page
+        elif selected_emoji == emoji_download:  # Download list
+            # Create the CSV file in memory
+            csv_file = user.watchlist.get_csv(sort_key=sort_key, reverse=not sort_ascending)
+            discord_file = File(fp=csv_file, filename=f"{user.display_name}.csv")
+            await msg.clear_reactions()
+            await msg.channel.send(file=discord_file)
+            time.sleep(5)  # Use sleep to prevent spamming download requests
 
         # Update message after page change
         embed = make_embed(pages[current_page - 1], current_page)
-        await msg.edit(embed=embed)
+        try:
+            await msg.edit(embed=embed)
+        except discord.NotFound:  # Message not found
+            msg = None  # In next iteration new message will be sent
+
 
 async def get_user_reaction(
         message: discord.Message,
