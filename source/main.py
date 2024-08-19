@@ -53,6 +53,7 @@ intents.message_content = True
 # Change the no_category default string in help command
 help_command = commands.DefaultHelpCommand(
     no_category='Commands',
+    show_parameter_descriptions=False
 )
 
 # Bot activity status
@@ -163,7 +164,9 @@ async def handle_user_input(message: Message, user) -> None:
         return
 
     if message.content.isdecimal():  # Numeric
-        user.state = UserState.movie_details
+        if old_state != UserState.watchlist_panel or int(message.content) in range(1, len(user.movie_selection_list)+1):
+            user.state = UserState.movie_details
+
     else:  # Not numeric
         if old_state != UserState.watchlist_panel:
             user.state = UserState.search_result
@@ -639,6 +642,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                 pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, len(entries), MAX_ROWS_WATCHLIST)]
                 pages_count = len(pages)
                 current_page = 1  # Reset to the first page
+                user.movie_selection_list = [e.movie for e in entries]
         elif selected_emoji == emoji_download:  # Download list
             # Create the CSV file in memory
             csv_file = user.watchlist.get_csv(sort_key=sort_key, reverse=not sort_ascending)
