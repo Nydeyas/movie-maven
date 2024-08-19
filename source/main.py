@@ -480,6 +480,17 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     user = get_user(ctx.author.id)
     title = f"Lista filmów ({user.display_name})"
 
+    entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
+    entries_count = len(entries)
+
+    if not entries:
+        description = "**Twoja lista jest pusta.**\n" \
+                      "Skorzystaj z komendy **m.szukaj**, aby wyszukać i dodać wybrane przez siebie filmy."
+        embed = construct_embedded_message(title=title, description=description, colour=0xdfc118)
+        # Send embedded message
+        await user_message.channel.send(embed=embed)
+        return
+
     def update_entries():
         """Update entries based on the current sort key and order"""
         nonlocal entries
@@ -533,8 +544,6 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                                          description=desc, colour=0xdfc118)
         return emb
 
-    entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
-    entries_count = len(entries)
     pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, entries_count, MAX_ROWS_WATCHLIST)]
     pages_count = len(pages)
     current_page = 1
@@ -642,8 +651,9 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
         embed = make_embed(pages[current_page - 1], current_page)
         try:
             await msg.edit(embed=embed)
-        except discord.NotFound:  # Message not found
-            msg = None  # In next iteration new message will be sent
+        except discord.NotFound as e:  # Message not found
+            logging.warning(f"Message not found when attempting to edit: {e}. Message ID might be invalid or deleted.")
+            msg = None  # Mark message as None to send a new one
 
 
 async def get_user_reaction(
@@ -655,10 +665,13 @@ async def get_user_reaction(
 ) -> Optional[discord.RawReactionActionEvent]:
     # Update reactions
     if controller or not emojis:
-        if message.channel.type != discord.ChannelType.private:
-            await message.clear_reactions()
-        for e in emojis:
-            await message.add_reaction(e)
+        try:
+            if message.channel.type != discord.ChannelType.private:
+                await message.clear_reactions()
+            for e in emojis:
+                await message.add_reaction(e)
+        except discord.NotFound as e:  # Message not found
+            logging.warning(f"Failed to add reactions. Message not found: {e}. Message ID might be invalid or deleted.")
 
     # CONDITIONS CHECK (1.user, 2.message, 3.emoji)
     def check_default(payload: discord.RawReactionActionEvent):

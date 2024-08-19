@@ -79,7 +79,6 @@ class Watchlist:
 
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 
-
     def get_movies(self, max_items: Optional[int] = None) -> List[Movie]:
         movies = [entry.movie for entry in self.entries]
         return movies[:max_items] if max_items is not None else movies
