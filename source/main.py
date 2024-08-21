@@ -113,12 +113,27 @@ async def save_user_data() -> None:
 
 @bot.command(aliases=['szukaj', 's', 'filmy', 'films', 'movies'], brief='Wyszukiwanie filmów',
              description='Wyszukuje tytuł filmu na podstawie wpisanej frazy')
-async def search(ctx: Context) -> None:
+async def search(ctx: Context, *title: Optional[str]) -> None:
+    """
+        This command allows users to search for movies by providing a query. The query can be a single word or multiple words.
+        If no query is provided, the function will open a search panel where users can enter their search criteria.
+
+        Parameters:
+        - ctx (Context): The context in which the command was invoked.
+        - title (Optional[str]): One or more words representing the movie title to search for.
+    """
     if ctx.channel.id in TEXT_CHANNELS and not bot.g_locked:
         if not is_user(ctx.author.id):
             # Add new User
             bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
-        await search_panel(ctx.message)
+
+        search_query = ' '.join(title) if title else None
+
+        if not search_query:
+            await search_panel(ctx.message)
+        else:
+            ctx.message.content = search_query
+            await search_result(ctx.message)
 
 
 @bot.command(aliases=['list', 'lista', 'w', 'wl', 'l'], brief='Lista filmów użytkownika',
@@ -164,7 +179,8 @@ async def handle_user_input(message: Message, user) -> None:
         return
 
     if message.content.isdecimal():  # Numeric
-        if old_state != UserState.watchlist_panel or int(message.content) in range(1, len(user.movie_selection_list)+1):
+        if old_state != UserState.watchlist_panel or int(message.content) in range(1,
+                                                                                   len(user.movie_selection_list) + 1):
             user.state = UserState.movie_details
 
     else:  # Not numeric
@@ -201,10 +217,11 @@ async def execute_state_handler(message: Message, user) -> None:
         user.state = UserState.idle
 
 
-async def search_panel(user_message: Message) -> None:
+async def search_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
     """Main panel of search engine"""
     ctx = await bot.get_context(user_message)
     user = get_user(ctx.author.id)
+    user.state = UserState.search_panel
     result_movies = []
     i = 1
 
@@ -271,13 +288,13 @@ async def search_panel(user_message: Message) -> None:
 
     # Update User
     user.message_id = msg.id
-    user.state = UserState.search_panel
     user.movie_selection_list = result_movies
 
 
-async def search_result(user_message: Message, bot_message: Message) -> None:
+async def search_result(user_message: Message, bot_message: Optional[Message] = None) -> None:
     """Search result panel shown (List of movies)"""
     user = get_user(user_message.author.id)
+    user.state = UserState.search_result
     user_input = user_message.content
     result_movies = []
     i = 1
@@ -332,19 +349,18 @@ async def search_result(user_message: Message, bot_message: Message) -> None:
     if not result_movies:
         description = "Nie znaleziono pasujących wyników."
         embed = construct_embedded_message(title=title, description=description)
-        await user_message.delete()
+    else:
+        embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
+                                           description=description)
+        user.movie_selection_list = result_movies
+
+    # Delete User message, Send/Edit Bot message
+    if not bot_message:
+        msg = await user_message.channel.send(embed=embed)
+        user.message_id = msg.id
+    else:
         await bot_message.edit(embed=embed)
-        return
-
-    # Send embedded message
-    embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
-                                       description=description)
-    # Update User
-    user.movie_selection_list = result_movies
-
-    # Delete User message, Edit Bot message
     await user_message.delete()
-    await bot_message.edit(embed=embed)
 
 
 async def movie_details(user_message: Message, bot_message: Message) -> None:
@@ -354,6 +370,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     rate_movie_emoji = '📊'
 
     user = get_user(user_message.author.id)
+    user.state = UserState.movie_details
 
     if not user:
         title = "Wyszukiwarka filmów (Brak użytkownika)"
@@ -443,10 +460,11 @@ async def rate_movie(user_message: Message, bot_message: Optional[Message] = Non
         REACTION_TIMEOUT,
         check=(
             lambda m: m.author == user_message.author
-            and m.content.replace('.', '', 1).isdigit()
+            and m.content.replace(".", "", 1).isdigit()
             and 1 <= float(m.content) <= 10
             and m.channel.id == bot_message.channel.id
         )
+
     )
     if response is None:
         timeout_description = "Czas na ocenę filmu upłynął."
@@ -481,6 +499,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
 
     ctx = await bot.get_context(user_message)
     user = get_user(ctx.author.id)
+    user.state = UserState.watchlist_panel
     title = f"Lista filmów ({user.display_name})"
 
     entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
@@ -572,7 +591,6 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
 
         if msg is None:  # If it's the first time, send a new message
             msg = await user_message.channel.send(embed=embed)
-            user.state = UserState.watchlist_panel
             user.message_id = msg.id
             user.movie_selection_list = [e.movie for e in entries]
         else:  # Otherwise, edit the existing message
@@ -689,10 +707,10 @@ async def get_user_reaction(
 
     # Create and update user task
     new_task = asyncio.create_task(bot.wait_for(
-            "raw_reaction_add",
-            timeout=timeout,
-            check=check if check is not None else check_default
-        )
+        "raw_reaction_add",
+        timeout=timeout,
+        check=check if check is not None else check_default
+    )
     )
     if controller:
         old_task = controller.interaction_task
@@ -715,19 +733,19 @@ async def get_user_text(
         timeout: Optional[float] = None,
         check: Callable[[discord.MessageInteraction], bool] | None = None
 ) -> Optional[discord.Message]:
-
     # CONDITIONS CHECK (1.user, 2.message)
     def check_default(message: discord.Message):
         user_id = message.author.id
         id_list = [p.id for p in bot.g_users]
-        return(user_id == controller.id if controller else user_id in id_list) and (message.channel.id in TEXT_CHANNELS)
+        return (user_id == controller.id if controller else user_id in id_list) and (
+                message.channel.id in TEXT_CHANNELS)
 
     # Create and update user task
     new_task = asyncio.create_task(bot.wait_for(
-            'message',
-            timeout=timeout,
-            check=check if check is not None else check_default
-        )
+        'message',
+        timeout=timeout,
+        check=check if check is not None else check_default
+    )
     )
     if controller:
         old_task = controller.interaction_task
