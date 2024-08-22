@@ -252,8 +252,10 @@ async def search_panel(user_message: Message, bot_message: Optional[Message] = N
         result_movies.extend(site_movies)
 
         for movie in site_movies:
+            # Mark watched movies
+            watched_mark = '✔' if user.watchlist.has_movie(movie) else ''
             # Split removes alternative titles
-            column_title = f"{i}\. {movie.title.split('/')[0]}"
+            column_title = f"{watched_mark} {i}\. {movie.title.split('/')[0]}"
             column_year_tags = f"{movie.year}\u2003{movie.tags}"
             column_rating = f"{movie.rating}"
 
@@ -324,8 +326,10 @@ async def search_result(user_message: Message, bot_message: Optional[Message] = 
         result_movies.extend(site_movies)
 
         for movie in site_movies:
+            # Mark watched movies
+            watched_mark = '✔' if user.watchlist.has_movie(movie) else ''
             # Split removes alternative titles
-            column_title = f"{i}\. {movie.title.split('/')[0]}"
+            column_title = f"{watched_mark} {i}\. {movie.title.split('/')[0]}"
             column_year_tags = f"{movie.year}\u2003{movie.tags}"
             column_rating = f"{movie.rating}"
 
