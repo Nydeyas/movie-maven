@@ -17,6 +17,8 @@ class User:
         self.display_name: str = display_name
         self.state: UserState = UserState.idle
         self.movie_selection_list: List[Movie] = []
+        self.selection_input: str = ''
+        self.search_query: str = ''
         self.message_id: int = 0
         self.interaction_task: Optional[Union[
             asyncio.Task[discord.RawReactionActionEvent],
@@ -38,5 +40,8 @@ class User:
         new_user.movie_selection_list = self.movie_selection_list.copy()
         new_user.message_id = self.message_id
         new_user.watchlist = self.watchlist
+        new_user.watchlist.user = new_user
         new_user.interaction_task = None
+        new_user.search_query = self.search_query
+        new_user.selection_input = self.selection_input
         return new_user

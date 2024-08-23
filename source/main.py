@@ -163,49 +163,82 @@ async def on_message(message: Message) -> None:
         return
 
     user = get_user(message.author.id)
-    await handle_user_input(message, user)
-    await execute_state_handler(message, user)
+    await process_state(message, user)
 
     await bot.process_commands(message)
 
 
-async def handle_user_input(message: Message, user) -> None:
-    """Handles user input based on the user's current state."""
+async def process_state(message: Message, user) -> None:
+    """Handles user input and executes the appropriate state handler."""
     old_state = user.state
-    blacklist = [UserState.idle, UserState.rate_movie]
-
-    if old_state in blacklist:
-        logging.debug(f"Input: '{message.content}', Old State: '{old_state}' (blacklisted for user input)")
-        return
-
-    if message.content.isdecimal():  # Numeric
-        if old_state != UserState.watchlist_panel or int(message.content) in range(1,
-                                                                                   len(user.movie_selection_list) + 1):
-            user.state = UserState.movie_details
-
-    else:  # Not numeric
-        if old_state != UserState.watchlist_panel:
-            user.state = UserState.search_result
-    logging.debug(f"Input: '{message.content}', Old State: '{old_state}', New state: '{user.state}'")
-
-
-async def execute_state_handler(message: Message, user) -> None:
-    """Executes the function corresponding to the user's current state."""
+    blacklist = [UserState.idle]
     state_functions = {
         UserState.search_panel: search_panel,
         UserState.search_result: search_result,
-        UserState.movie_details: movie_details,
+        UserState.movie_details_search: movie_details,
+        UserState.movie_details_watchlist: movie_details,
+        UserState.watchlist_panel: watchlist_panel,
     }
-    blacklist = [UserState.idle, UserState.rate_movie, UserState.watchlist_panel]
-    state = user.state
 
-    if state in blacklist:
-        logging.debug(f"No handler was executed ('{state}' is blacklisted for handler )")
+    # Determine the new state based on the input
+    if message.content.isdecimal():  # Numeric input
+        if int(message.content) in range(1, len(user.movie_selection_list)+1) and old_state in [
+            UserState.watchlist_panel,
+            UserState.movie_details_watchlist
+        ]:
+            user.state = UserState.movie_details_watchlist
+        elif old_state in [
+            UserState.search_panel,
+            UserState.search_result,
+            UserState.movie_details_search,
+        ]:
+            user.state = UserState.movie_details_search
+        else:
+            logging.debug(f"Input: '{message.content}', Old State: '{old_state}', (returned)")
+            return
+    elif message.content.lower() == 'w':  # Go back
+        if old_state == UserState.movie_details_search:  # Movie details from search
+            if not user.search_query:  # If query is empty go search panel
+                user.state = UserState.search_panel
+            else:
+                user.state = UserState.search_result
+            message.content = user.search_query
+        elif old_state == UserState.movie_details_watchlist:  # Movie details from watchlist
+            user.state = UserState.watchlist_panel
+        elif old_state == UserState.search_result:  # Search result
+            user.state = UserState.search_panel
+        elif old_state == UserState.rate_movie_search:  # Rate movie from search
+            message.content = user.selection_input
+            user.state = UserState.movie_details_search
+        elif old_state == UserState.rate_movie_watchlist:  # Rate movie from watchlist
+            message.content = user.selection_input
+            user.state = UserState.movie_details_watchlist
+        else:
+            logging.debug(f"Input: '{message.content}', Old State: '{old_state}', (returned)")
+            return
+    else:  # Non-numeric input
+        if old_state in [
+            UserState.search_panel,
+            UserState.search_result,
+            UserState.movie_details_search,
+            UserState.movie_details_watchlist
+        ]:
+            user.state = UserState.search_result
+        else:
+            logging.debug(f"Input: '{message.content}', Old State: '{old_state}', (returned)")
+            return
+
+    new_state = user.state
+    logging.debug(f"Input: '{message.content}', Old State: '{old_state}', New state: '{new_state}'")
+
+    if new_state in blacklist:
+        logging.debug(f"No handler was executed ('{new_state}' is blacklisted for handler )")
         return
 
-    handler = state_functions.get(state)
+    # Execute the handler for the new state
+    handler = state_functions.get(new_state)
     if not handler:
-        logging.warning(f"Unknown UserState: {state}")
+        logging.warning(f"Unknown UserState: {new_state}")
         return
 
     try:
@@ -220,8 +253,10 @@ async def execute_state_handler(message: Message, user) -> None:
 async def search_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
     """Main panel of search engine"""
     ctx = await bot.get_context(user_message)
+    channel = user_message.channel
     user = get_user(ctx.author.id)
     user.state = UserState.search_panel
+    user.search_query = ''
     result_movies = []
     i = 1
 
@@ -276,17 +311,21 @@ async def search_panel(user_message: Message, bot_message: Optional[Message] = N
             field_rating += column_rating + "\n"
             i += 1
 
+    # If User message is not initial message - delete it
+    if bot_message is not None:
+        await user_message.delete()
+
     if not result_movies:
         description = "Brak filmów w bazie."
         embed = construct_embedded_message(title=title, description=description)
         # Send embedded message
-        await user_message.channel.send(embed=embed)
+        await channel.send(embed=embed)
         return
 
     # Send embedded message
     embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
                                        description=description)
-    msg = await user_message.channel.send(embed=embed)
+    msg = await channel.send(embed=embed)
 
     # Update User
     user.message_id = msg.id
@@ -298,6 +337,7 @@ async def search_result(user_message: Message, bot_message: Optional[Message] = 
     user = get_user(user_message.author.id)
     user.state = UserState.search_result
     user_input = user_message.content
+    user.search_query = user_input
     result_movies = []
     i = 1
 
@@ -350,12 +390,14 @@ async def search_result(user_message: Message, bot_message: Optional[Message] = 
             field_rating += column_rating + "\n"
             i += 1
 
+    footer = make_footer({}, show_back=True)
+
     if not result_movies:
         description = "Nie znaleziono pasujących wyników."
-        embed = construct_embedded_message(title=title, description=description)
+        embed = construct_embedded_message(title=title, description=description, footer=footer)
     else:
         embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
-                                           description=description)
+                                           description=description, footer=footer)
         user.movie_selection_list = result_movies
 
     # Delete User message, Send/Edit Bot message
@@ -374,7 +416,6 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     rate_movie_emoji = '📊'
 
     user = get_user(user_message.author.id)
-    user.state = UserState.movie_details
 
     if not user:
         title = "Wyszukiwarka filmów (Brak użytkownika)"
@@ -394,6 +435,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         await bot_message.edit(embed=embed)
         return
 
+    user.selection_input = input_int
     selected_movie = user.movie_selection_list[input_int - 1]
 
     description = (
@@ -417,7 +459,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
 
     # Set footer, Delete User message, Edit Bot message
-    footer_text = make_footer(emoji_to_text)
+    footer_text = make_footer(emoji_to_text, show_back=True)
     embed.set_footer(text=footer_text)
     await user_message.delete()
     msg = await bot_message.edit(embed=embed)
@@ -437,11 +479,12 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
             user.watchlist.remove_movie(selected_movie)
             emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
         elif selected_emoji == rate_movie_emoji:
+            state = user.state
             await rate_movie(user_message, bot_message)
             time.sleep(2)
-            user.state = UserState.movie_details
+            user.state = state
         # Update message
-        footer_text = make_footer(emoji_to_text)
+        footer_text = make_footer(emoji_to_text, show_back=True)
         embed.set_footer(text=footer_text)
         await msg.edit(embed=embed)
 
@@ -449,13 +492,17 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
 async def rate_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
     # Prompt user to enter rating
     user = get_user(user_message.author.id)
-    user.state = UserState.rate_movie
+    if user.state == UserState.movie_details_watchlist:
+        user.state = UserState.rate_movie_watchlist
+    else:
+        user.state = UserState.rate_movie_search
     input_int = int(user_message.content)
     selected_movie = user.movie_selection_list[input_int - 1]
 
     await bot_message.clear_reactions()
     rating_prompt = "Wybierz ocenę filmu (1-10):"
-    rating_embed = construct_embedded_message(title="Oceń Film", description=rating_prompt)
+    footer = make_footer({}, show_back=True)
+    rating_embed = construct_embedded_message(title="Oceń Film", description=rating_prompt, footer=footer)
     await bot_message.edit(embed=rating_embed)
 
     # Wait for user to enter a rating
@@ -502,6 +549,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     emoji_sort_ascending = '📈'
 
     ctx = await bot.get_context(user_message)
+    channel = user_message.channel
     user = get_user(ctx.author.id)
     user.state = UserState.watchlist_panel
     title = f"Lista filmów ({user.display_name})"
@@ -509,12 +557,16 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
     entries_count = len(entries)
 
+    # If User message is not initial message - delete it
+    if bot_message is not None:
+        await user_message.delete()
+
     if not entries:
         description = "**Twoja lista jest pusta.**\n" \
                       "Skorzystaj z komendy **m.szukaj**, aby wyszukać i dodać wybrane przez siebie filmy."
         embed = construct_embedded_message(title=title, description=description, colour=0xdfc118)
         # Send embedded message
-        await user_message.channel.send(embed=embed)
+        await channel.send(embed=embed)
         return
 
     def update_entries():
@@ -594,7 +646,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
         embed.set_footer(text=footer)
 
         if msg is None:  # If it's the first time, send a new message
-            msg = await user_message.channel.send(embed=embed)
+            msg = await channel.send(embed=embed)
             user.message_id = msg.id
             user.movie_selection_list = [e.movie for e in entries]
         else:  # Otherwise, edit the existing message
@@ -689,6 +741,13 @@ async def get_user_reaction(
         timeout: Optional[float] = None,
         check: Callable[[discord.MessageInteraction], bool] | None = None
 ) -> Optional[discord.RawReactionActionEvent]:
+    # Cancel old task
+    if controller:
+        old_task = controller.interaction_task
+        if old_task and not old_task.done():
+            logging.debug(f"Cancelling task: name={old_task.get_name()}")
+            old_task.cancel()
+
     # Update reactions
     if controller or not emojis:
         try:
@@ -717,10 +776,6 @@ async def get_user_reaction(
     )
     )
     if controller:
-        old_task = controller.interaction_task
-        if old_task and not old_task.done():
-            logging.debug(f"Cancelling task: name={old_task.get_name()}")
-            old_task.cancel()
         controller.interaction_task = new_task
 
     # Wait for the reaction
@@ -790,9 +845,11 @@ def construct_embedded_message(*fields: str, title: str = '', description: str =
     return embed
 
 
-def make_footer(emoji_mapping: Dict[str, str]) -> str:
+def make_footer(emoji_mapping: Dict[str, str], show_back: bool = False) -> str:
     """Creates a footer string from emoji-to-text mapping."""
     footer_parts = [f"{emoji} {text}" for emoji, text in emoji_mapping.items()]
+    if show_back:
+        footer_parts.append("w - powrót")
     return " | ".join(footer_parts)
 
 
