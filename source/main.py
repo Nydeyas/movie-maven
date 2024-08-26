@@ -127,13 +127,9 @@ async def search(ctx: Context, *title: Optional[str]) -> None:
             # Add new User
             bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
 
-        search_query = ' '.join(title) if title else None
-
-        if not search_query:
-            await search_panel(ctx.message)
-        else:
-            ctx.message.content = search_query
-            await search_result(ctx.message)
+        search_query = ' '.join(title) if title else ''
+        ctx.message.content = search_query
+        await search_movie(ctx.message)
 
 
 @bot.command(aliases=['list', 'lista', 'w', 'wl', 'l'], brief='Lista filmów użytkownika',
@@ -173,8 +169,7 @@ async def process_state(message: Message, user) -> None:
     old_state = user.state
     blacklist = [UserState.idle]
     state_functions = {
-        UserState.search_panel: search_panel,
-        UserState.search_result: search_result,
+        UserState.search_movie: search_movie,
         UserState.movie_details_search: movie_details,
         UserState.movie_details_watchlist: movie_details,
         UserState.watchlist_panel: watchlist_panel,
@@ -188,8 +183,7 @@ async def process_state(message: Message, user) -> None:
         ]:
             user.state = UserState.movie_details_watchlist
         elif old_state in [
-            UserState.search_panel,
-            UserState.search_result,
+            UserState.search_movie,
             UserState.movie_details_search,
         ]:
             user.state = UserState.movie_details_search
@@ -198,15 +192,10 @@ async def process_state(message: Message, user) -> None:
             return
     elif message.content.lower() == 'w':  # Go back
         if old_state == UserState.movie_details_search:  # Movie details from search
-            if not user.search_query:  # If query is empty go search panel
-                user.state = UserState.search_panel
-            else:
-                user.state = UserState.search_result
+            user.state = UserState.search_movie
             message.content = user.search_query
         elif old_state == UserState.movie_details_watchlist:  # Movie details from watchlist
             user.state = UserState.watchlist_panel
-        elif old_state == UserState.search_result:  # Search result
-            user.state = UserState.search_panel
         elif old_state == UserState.rate_movie_search:  # Rate movie from search
             message.content = user.selection_input
             user.state = UserState.movie_details_search
@@ -218,12 +207,11 @@ async def process_state(message: Message, user) -> None:
             return
     else:  # Non-numeric input
         if old_state in [
-            UserState.search_panel,
-            UserState.search_result,
+            UserState.search_movie,
             UserState.movie_details_search,
             UserState.movie_details_watchlist
         ]:
-            user.state = UserState.search_result
+            user.state = UserState.search_movie
         else:
             logging.debug(f"Input: '{message.content}', Old State: '{old_state}', (returned)")
             return
@@ -250,99 +238,18 @@ async def process_state(message: Message, user) -> None:
         user.state = UserState.idle
 
 
-async def search_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
-    """Main panel of search engine"""
+async def search_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
+    """Search result panel shown (List of movies)"""
     ctx = await bot.get_context(user_message)
     channel = user_message.channel
     user = get_user(ctx.author.id)
-    user.state = UserState.search_panel
-    user.search_query = ''
-    result_movies = []
-    i = 1
-
-    title = f"Wyszukiwarka filmów ({user.display_name})"
-    description = "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n" \
-                  "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
-    field_title = ''
-    field_year_tags = ''
-    field_rating = ''
-
-    for site in list(bot.g_sites):
-        site_name = f"**{str(site).upper()}:**\n"
-        line_break = "\u200B\n"
-
-        # Check field length limit
-        if (len(field_title) + len(site_name) > MAX_FIELD_LENGTH or
-                len(field_year_tags) + len(line_break) > MAX_FIELD_LENGTH or
-                len(field_rating) + len(line_break) > MAX_FIELD_LENGTH):
-            break
-
-        # Add site name to field_title and placeholders for alignment
-        field_title += site_name
-        field_year_tags += line_break
-        field_rating += line_break
-
-        # Make list of last added movies
-        site_movies = site.get_movies_sorted_by_date_added(max_items=MAX_ROWS_SEARCH, reverse=True)
-        result_movies.extend(site_movies)
-
-        for movie in site_movies:
-            # Mark watched movies
-            watched_mark = '✔' if user.watchlist.has_movie(movie) else ''
-            # Split removes alternative titles
-            column_title = f"{watched_mark} {i}\. {movie.title.split('/')[0]}"
-            column_year_tags = f"{movie.year}\u2003{movie.tags}"
-            column_rating = f"{movie.rating}"
-
-            # Limit Row Width
-            if len(column_title) >= 37:
-                column_title = column_title[:34] + "..."
-            if len(column_year_tags) >= 26:
-                column_year_tags = column_year_tags[:23].rstrip(",") + "..."
-
-            # Check field length limit
-            if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
-                    len(field_year_tags) + len(column_year_tags) + 1 > MAX_FIELD_LENGTH or
-                    len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
-                break
-
-            field_title += column_title + "\n"
-            field_year_tags += column_year_tags + "\n"
-            field_rating += column_rating + "\n"
-            i += 1
-
-    # If User message is not initial message - delete it
-    if bot_message is not None:
-        await user_message.delete()
-
-    if not result_movies:
-        description = "Brak filmów w bazie."
-        embed = construct_embedded_message(title=title, description=description)
-        # Send embedded message
-        await channel.send(embed=embed)
-        return
-
-    # Send embedded message
-    embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
-                                       description=description)
-    msg = await channel.send(embed=embed)
-
-    # Update User
-    user.message_id = msg.id
-    user.movie_selection_list = result_movies
-
-
-async def search_result(user_message: Message, bot_message: Optional[Message] = None) -> None:
-    """Search result panel shown (List of movies)"""
-    user = get_user(user_message.author.id)
-    user.state = UserState.search_result
+    user.state = UserState.search_movie
     user_input = user_message.content
     user.search_query = user_input
     result_movies = []
     i = 1
 
     title = f"Wyszukiwarka filmów ({user.display_name})"
-    description = "**Znalezione wyniki:**\n\n"
     field_title = ''
     field_year_tags = ''
     field_rating = ''
@@ -362,7 +269,11 @@ async def search_result(user_message: Message, bot_message: Optional[Message] = 
         field_year_tags += line_break
         field_rating += line_break
 
-        site_movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH, min_match_score=MIN_MATCH_SCORE)
+        if not user_input:
+            site_movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH, min_match_score=0.0)
+        else:
+            site_movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH,
+                                             min_match_score=MIN_MATCH_SCORE)
         result_movies.extend(site_movies)
 
         for movie in site_movies:
@@ -390,23 +301,27 @@ async def search_result(user_message: Message, bot_message: Optional[Message] = 
             field_rating += column_rating + "\n"
             i += 1
 
-    footer = make_footer({}, show_back=True)
-
     if not result_movies:
-        description = "Nie znaleziono pasujących wyników."
-        embed = construct_embedded_message(title=title, description=description, footer=footer)
+        description = "Brak filmów w bazie." if not user_input else "Nie znaleziono pasujących wyników."
+        embed = construct_embedded_message(title=title, description=description)
     else:
+        description = (
+            "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
+            "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
+            if not user_input
+            else "**Znalezione wyniki:**\n\n"
+        )
         embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
-                                           description=description, footer=footer)
+                                           description=description)
         user.movie_selection_list = result_movies
 
     # Delete User message, Send/Edit Bot message
     if not bot_message:
-        msg = await user_message.channel.send(embed=embed)
+        msg = await channel.send(embed=embed)
         user.message_id = msg.id
     else:
         await bot_message.edit(embed=embed)
-    await user_message.delete()
+        await user_message.delete()
 
 
 async def movie_details(user_message: Message, bot_message: Message) -> None:
