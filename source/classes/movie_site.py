@@ -2,11 +2,47 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional, Dict
 from difflib import SequenceMatcher
 from Levenshtein import distance
+import locale
 
 from source.classes.movie import Movie
 
 if TYPE_CHECKING:
     from source.classes.types_base import Movie as MoviePayload
+
+
+def replace_none(value, default=0):
+    return default if value is None else value
+
+
+def longest_common_substring_percentage(s1: str, s2: str) -> float:
+    """Computes the longest common substring percentage of s1 and s2."""
+    if not s1 or not s2:
+        return 0.0
+
+    seq_matcher = SequenceMatcher(None, s1, s2)
+    match = seq_matcher.find_longest_match(0, len(s1), 0, len(s2))
+
+    if match.size:
+        lcs_length = match.size
+        return lcs_length / min(len(s1), len(s2))
+    else:
+        return 0.0
+
+
+def levenshtein_distance_percentage(s1: str, s2: str) -> float:
+    """Computes the Levenshtein distance. Measures how closely the s1 matches the s2. Used mainly for typos."""
+    if not s1 or not s2:
+        return 0.0
+    return 1.0 - distance(s1, s2) / max(len(s1), len(s2))
+
+
+def simple_match_percentage(s1: str, s2: str) -> float:
+    """Computes the simple comparison checking for exact word matches between the s1 and the s2."""
+    if not s1 or not s2:
+        return 0.0
+    s1_split = s1.split(" ")
+    match_count = sum(1 for x in s1_split if x in s2)
+    return match_count / len(s1_split)
 
 
 class MovieSite:
@@ -26,17 +62,30 @@ class MovieSite:
 
     def get_movies_sorted_by_title(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         """Return a list of movies sorted alphabetically by title."""
-        sorted_movies = sorted(self.movies, key=lambda movie: movie.title, reverse=reverse)
+        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
+        sorted_movies = sorted(self.movies, key=lambda m: locale.strxfrm(m.title), reverse=reverse)
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
 
     def get_movies_sorted_by_rating(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         """Return a list of movies sorted by rating."""
-        sorted_movies = sorted(self.movies, key=lambda movie: movie.rating, reverse=reverse)
+        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
+        sorted_movies = sorted(
+            self.movies,
+            key=lambda m: (replace_none(m.rating), locale.strxfrm(m.title))
+            if not reverse
+            else (-replace_none(m.rating), locale.strxfrm(m.title)),
+            reverse=False  # Sort by the primary key as adjusted
+        )
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
 
     def get_movies_sorted_by_year(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         """Return a list of movies sorted by year."""
-        sorted_movies = sorted(self.movies, key=lambda movie: movie.year, reverse=reverse)
+        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
+        sorted_movies = sorted(
+            self.movies,
+            key=lambda m: ((m.year, locale.strxfrm(m.title)) if not reverse else (-m.year, locale.strxfrm(m.title))),
+            reverse=False  # Sort by the primary key as adjusted
+        )
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
 
     def get_movies_sorted_by_date_added(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
@@ -50,7 +99,8 @@ class MovieSite:
             max_items: Optional[int] = None,
             min_match_score: float = 0.0,
             sort_key: str = 'match_score',
-            reverse: bool = False
+            reverse: bool = False,
+            limit_before_sort: bool = False
     ) -> List[Movie]:
         """
         Search for movies that match a given phrase and return a sorted list of results based on the match score.
@@ -68,6 +118,7 @@ class MovieSite:
         - min_match_score (float): The minimum score required for a movie to be included in the results. (0.0-100.0)
         - sort_key (str): The key to sort the movies by. Can be 'match_score', 'date_added', 'year', 'title', 'rating'.
         - reverse (bool): If True, sorts the list in descending order based on the sort key.
+        - limit_before_sort (bool): If True, limits the number of items before sorting. If False, limits after sorting.
 
         Returns:
         - List[Movie]: A list of movies sorted by match score in descending order.
@@ -77,65 +128,43 @@ class MovieSite:
 
         for movie in self.movies:
             title_lower = movie.title.lower()
-            smp = self.simple_match_percentage(phrase_lower, title_lower)
-            ldp = self.levenshtein_distance_percentage(phrase_lower, title_lower)
-            lcsp = self.longest_common_substring_percentage(phrase_lower, title_lower)
+            smp = simple_match_percentage(phrase_lower, title_lower)
+            ldp = levenshtein_distance_percentage(phrase_lower, title_lower)
+            lcsp = longest_common_substring_percentage(phrase_lower, title_lower)
             match_score = 25 * smp + 5 * ldp + 70 * lcsp
             if match_score >= min_match_score:
                 movie_matches[movie] = match_score
 
-        # Extract sorted movies
-        movies_sorted_by_score: List[Movie] = sorted(movie_matches.items(), key=lambda x: x[1], reverse=True)
+        # Sort by match score
+        sorted_movies_with_scores = sorted(movie_matches.items(), key=lambda x: x[1], reverse=True)
 
-        # Sort based on the specified sort key if it's not 'match_score'
+        # Extract movies only
+        movies_sorted_by_score = [movie for movie, score in sorted_movies_with_scores]
+
+        # Limit the number of items before sorting if limit_before_sort is True
+        if limit_before_sort and max_items is not None:
+            movies_sorted_by_score = movies_sorted_by_score[:max_items]
+
+        # Sort based on the specified sort key
         if sort_key == 'match_score':
-            # Already sorted by match_score, no further sorting needed
-            final_sorted_movies = movies_sorted_by_score
+            result_movies = movies_sorted_by_score
         elif sort_key == 'title':
-            final_sorted_movies = self.get_movies_sorted_by_title(max_items=None, reverse=reverse)
+            result_movies = self.get_movies_sorted_by_title(max_items=None, reverse=reverse)
         elif sort_key == 'rating':
-            final_sorted_movies = self.get_movies_sorted_by_rating(max_items=None, reverse=reverse)
+            result_movies = self.get_movies_sorted_by_rating(max_items=None, reverse=reverse)
         elif sort_key == 'year':
-            final_sorted_movies = self.get_movies_sorted_by_year(max_items=None, reverse=reverse)
+            result_movies = self.get_movies_sorted_by_year(max_items=None, reverse=reverse)
         elif sort_key == 'date_added':
-            final_sorted_movies = self.get_movies_sorted_by_date_added(max_items=None, reverse=reverse)
+            result_movies = self.get_movies_sorted_by_date_added(max_items=None, reverse=reverse)
         else:
             raise ValueError(f"Unknown sort_key: {sort_key}")
 
-        # Filter out movies that were not in the original sorted by score list (only if sort_key is not 'match_score')
+        # Filter out movies that were not in the original sorted by score list
         if sort_key != 'match_score':
-            final_sorted_movies = [movie for movie in final_sorted_movies if movie in movies_sorted_by_score]
+            result_movies = [m for m in result_movies if m in movies_sorted_by_score]
 
-        # Limit the number of items if max_items is specified
-        if max_items is not None:
-            final_sorted_movies = final_sorted_movies[:max_items]
+        # Limit the number of items after sorting if limit_before_sort is False
+        if not limit_before_sort and max_items is not None:
+            result_movies = result_movies[:max_items]
 
-        return [movie for movie, score in final_sorted_movies]
-
-    def simple_match_percentage(self, s1: str, s2: str) -> float:
-        """Computes the simple comparison checking for exact word matches between the s1 and the s2."""
-        if not s1 or not s2:
-            return 0.0
-        s1_split = s1.split(" ")
-        match_count = sum(1 for x in s1_split if x in s2)
-        return match_count / len(s1_split)
-
-    def levenshtein_distance_percentage(self, s1: str, s2: str) -> float:
-        """Computes the Levenshtein distance. Measures how closely the s1 matches the s2. Used mainly for typos."""
-        if not s1 or not s2:
-            return 0.0
-        return 1.0 - distance(s1, s2) / max(len(s1), len(s2))
-
-    def longest_common_substring_percentage(self, s1: str, s2: str) -> float:
-        """Computes the longest common substring percentage of s1 and s2."""
-        if not s1 or not s2:
-            return 0.0
-
-        seq_matcher = SequenceMatcher(None, s1, s2)
-        match = seq_matcher.find_longest_match(0, len(s1), 0, len(s2))
-
-        if match.size:
-            lcs_length = match.size
-            return lcs_length / min(len(s1), len(s2))
-        else:
-            return 0.0
+        return result_movies

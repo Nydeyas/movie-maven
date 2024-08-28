@@ -61,7 +61,7 @@ class Watchlist:
                 if not reverse
                 else (-e.date_added.toordinal(), locale.strxfrm(e.movie.title))
             ),
-            reverse=False  # Always sort by the primary key as adjusted
+            reverse=False  # Sort by the primary key as adjusted
         )
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 

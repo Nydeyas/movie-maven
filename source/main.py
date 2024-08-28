@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import logging
 
 from source.classes.enums import UserState
+from source.classes.movie import Movie
 from source.classes.user import User
 from source.classes.watchlist import MovieEntry
 
@@ -115,7 +116,7 @@ async def save_user_data() -> None:
              description='Wyszukuje tytuł filmu na podstawie wpisanej frazy')
 async def search(ctx: Context, *title: Optional[str]) -> None:
     """
-        This command allows users to search for movies by providing a query. The query can be a single word or multiple words.
+        This command allows users to search for movies with a query. The query can be a single word or multiple words.
         If no query is provided, the function will open a search panel where users can enter their search criteria.
 
         Parameters:
@@ -177,7 +178,7 @@ async def process_state(message: Message, user) -> None:
 
     # Determine the new state based on the input
     if message.content.isdecimal():  # Numeric input
-        if int(message.content) in range(1, len(user.movie_selection_list)+1) and old_state in [
+        if int(message.content) in range(1, len(user.movie_selection_list) + 1) and old_state in [
             UserState.watchlist_panel,
             UserState.movie_details_watchlist
         ]:
@@ -236,92 +237,250 @@ async def process_state(message: Message, user) -> None:
     except discord.HTTPException as err:
         logging.warning(f"Error fetching message ({message.channel}): {err}")
         user.state = UserState.idle
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
 
 
 async def search_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
     """Search result panel shown (List of movies)"""
+    # Emojis
+    emoji_sort = '🔀'
+    emoji_sort_reset = '🔄'
+    emoji_sort_exit = '🆗'
+    emoji_sort_by_title = '🆎'
+    emoji_sort_by_year = '📅'
+    emoji_sort_by_rating = '🏆'
+    emoji_sort_by_date_added = '🔥'
+    emoji_sort_descending = '📉'
+    emoji_sort_ascending = '📈'
+
     ctx = await bot.get_context(user_message)
     channel = user_message.channel
     user = get_user(ctx.author.id)
     user.state = UserState.search_movie
-    user_input = user_message.content
+    user_input = user_message.content[:100]
     user.search_query = user_input
-    result_movies = []
-    i = 1
+    msg = bot_message
 
-    title = f"Wyszukiwarka filmów ({user.display_name})"
-    field_title = ''
-    field_year_tags = ''
-    field_rating = ''
+    # Default sorting parameters
+    if user_input:
+        sort_ascending = True
+        sort_key = 'match_score'
+    else:
+        sort_ascending = False
+        sort_key = 'date_added'
 
-    for site in list(bot.g_sites):
-        site_name = f"**{str(site).upper()}:**\n"
-        line_break = "\u200B\n"
+    def make_embed(movies: List[Movie]) -> discord.Embed:
+        """Create the embed message with the current search results."""
+        title = f"Wyszukiwarka filmów ({user.display_name})"
+        field_title, field_year_tags, field_rating = '', '', ''
+        i = 1
 
-        # Check field length limit
-        if (len(field_title) + len(site_name) > MAX_FIELD_LENGTH or
-                len(field_year_tags) + len(line_break) > MAX_FIELD_LENGTH or
-                len(field_rating) + len(line_break) > MAX_FIELD_LENGTH):
-            break
-
-        # Add site name to field_title and placeholders for alignment
-        field_title += site_name
-        field_year_tags += line_break
-        field_rating += line_break
-
-        if not user_input:
-            site_movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH, min_match_score=0.0)
-        else:
-            site_movies = site.search_movies(phrase=user_input, max_items=MAX_ROWS_SEARCH,
-                                             min_match_score=MIN_MATCH_SCORE)
-        result_movies.extend(site_movies)
-
-        for movie in site_movies:
-            # Mark watched movies
-            watched_mark = '✔' if user.watchlist.has_movie(movie) else ''
-            # Split removes alternative titles
-            column_title = f"{watched_mark} {i}\. {movie.title.split('/')[0]}"
-            column_year_tags = f"{movie.year}\u2003{movie.tags}"
-            column_rating = f"{movie.rating}"
-
-            # Limit Row Width
-            if len(column_title) >= 37:
-                column_title = column_title[:34] + "..."
-            if len(column_year_tags) >= 26:
-                column_year_tags = column_year_tags[:23].rstrip(",") + "..."
+        for s in bot.g_sites:
+            site_name = f"**{str(s).upper()}:**\n"
+            line_break = "\u200B\n"
 
             # Check field length limit
-            if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
-                    len(field_year_tags) + len(column_year_tags) + 1 > MAX_FIELD_LENGTH or
-                    len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+            if (len(field_title) + len(site_name) > MAX_FIELD_LENGTH or
+                    len(field_year_tags) + len(line_break) > MAX_FIELD_LENGTH or
+                    len(field_rating) + len(line_break) > MAX_FIELD_LENGTH):
                 break
 
-            field_title += column_title + "\n"
-            field_year_tags += column_year_tags + "\n"
-            field_rating += column_rating + "\n"
-            i += 1
+            # Add site name to field_title and placeholders for alignment
+            field_title += site_name
+            field_year_tags += line_break
+            field_rating += line_break
 
-    if not result_movies:
-        description = "Brak filmów w bazie." if not user_input else "Nie znaleziono pasujących wyników."
-        embed = construct_embedded_message(title=title, description=description)
-    else:
-        description = (
-            "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
-            "Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n**Ostatnio dodane**:\n\n"
-            if not user_input
-            else "**Znalezione wyniki:**\n\n"
-        )
-        embed = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
+            for movie in movies:
+                if movie.site != s:  # Skip movies not from the current site
+                    continue
+
+                watched_mark = '✔' if user.watchlist.has_movie(movie) else ''
+                column_title = f"{watched_mark} {i}\. {movie.title.split('/')[0]}"
+                column_year_tags = f"{movie.year}\u2003{movie.tags}"
+                column_rating = f"{movie.rating}"
+
+                # Limit Row Width
+                if len(column_title) >= 37:
+                    column_title = column_title[:34] + "..."
+                if len(column_year_tags) >= 26:
+                    column_year_tags = column_year_tags[:23].rstrip(",") + "..."
+
+                # Check field length limit
+                if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
+                        len(field_year_tags) + len(column_year_tags) + 1 > MAX_FIELD_LENGTH or
+                        len(field_rating) + len(column_rating) + 1 > MAX_FIELD_LENGTH):
+                    break
+
+                field_title += column_title + "\n"
+                field_year_tags += column_year_tags + "\n"
+                field_rating += column_rating + "\n"
+                i += 1
+
+        if not movies:
+            if not user_input:
+                description = "Brak filmów w bazie."
+            else:
+                description = f"**Wyniki: {user_input}**\n\nNie znaleziono pasujących wyników."
+            e = construct_embedded_message(title=title, description=description)
+        else:
+            # Determine the sorting description
+            sort_desc = {
+                'title': 'Tytuł',
+                'rating': 'Ocena',
+                'year': 'Rok'
+            }
+
+            if sort_key == 'date_added':
+                if sort_ascending:
+                    sorting_info = '**Sortowanie: Data dodania (rosnąco)**\n'
+                else:
+                    if user_input:
+                        sorting_info = '**Sortowanie: Data dodania (malejąco)**\n'
+                    else:
+                        sorting_info = '**Ostatnio dodane:**\n'  # Default sort text for empty m.search command
+            elif sort_key != 'match_score':
+                key = sort_key.split('_')[0]  # Extract part before '_'
+                sort_label = sort_desc.get(key, '')
+                order_label = 'rosnąco' if sort_ascending else 'malejąco'
+                sorting_info = f'**Sortowanie: {sort_label} ({order_label})**\n'
+            else:
+                sorting_info = ''
+
+            # Create description based on user_input
+            if user_input:
+                description = f"{sorting_info}\n**Wyniki: {user_input}**\n\n"
+            else:
+                description = (
+                    "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
+                    f"Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n{sorting_info}\n\n"
+                )
+
+            # Construct the embed message
+            e = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
                                            description=description)
+        return e
+
+    # Delete the user's message if the function wasn't triggered by a command.
+    if msg:
+        await user_message.delete()
+
+    # Main loop for handling user interactions
+    while True:
+        # Perform the search with sorting
+        result_movies = []
+        for site in bot.g_sites:
+            # get specific search result if there is input or get all movies if there is no input
+            site_movies = site.search_movies(
+                phrase=user_input,
+                max_items=MAX_ROWS_SEARCH,
+                min_match_score=MIN_MATCH_SCORE if user_input else 0.0,
+                sort_key=sort_key,
+                reverse=not sort_ascending,
+                limit_before_sort=True if user_input else False
+            )
+            result_movies.extend(site_movies)
+
         user.movie_selection_list = result_movies
 
-    # Delete User message, Send/Edit Bot message
-    if not bot_message:
-        msg = await channel.send(embed=embed)
-        user.message_id = msg.id
-    else:
-        await bot_message.edit(embed=embed)
-        await user_message.delete()
+        embed = make_embed(result_movies)
+        emoji_to_text = {
+            emoji_sort: "Sortuj",
+        }
+        footer = make_footer(emoji_mapping=emoji_to_text)
+        embed.set_footer(text=footer)
+
+        if msg is None:
+            msg = await channel.send(embed=embed)
+            user.message_id = msg.id
+        else:
+            await msg.edit(embed=embed)
+
+        # Get user reaction for sorting
+        payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
+        if payload is None:
+            return
+
+        selected_emoji = str(payload.emoji)
+
+        if selected_emoji == emoji_sort:  # Sorting menu
+            while True:
+                # Prepare sorting options based on the current sort key
+                sort_options = {
+                    'match_score': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku wydania",
+                                    emoji_sort_by_rating: "Sortuj po Ocenie",
+                                    emoji_sort_by_date_added: "Sortuj po dacie dodania"},
+                    'title': {emoji_sort_by_year: "Sortuj po Roku wydania", emoji_sort_by_rating: "Sortuj po Ocenie",
+                              emoji_sort_by_date_added: "Sortuj po dacie dodania"},
+                    'year': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_rating: "Sortuj po Ocenie",
+                             emoji_sort_by_date_added: "Sortuj po dacie dodania"},
+                    'rating': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku wydania",
+                               emoji_sort_by_date_added: "Sortuj po dacie dodania"},
+                    'date_added': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku wydania",
+                                   emoji_sort_by_rating: "Sortuj po Ocenie"}
+                }
+                emoji_to_text = sort_options.get(sort_key, {})
+
+                # Sorting order options
+                if sort_key != 'match_score':
+                    if sort_ascending:
+                        emoji_to_text[emoji_sort_descending] = "Sortuj malejąco"
+                    else:
+                        emoji_to_text[emoji_sort_ascending] = "Sortuj rosnąco"
+                    emoji_to_text[emoji_sort_reset] = "Resetuj sortowanie"
+
+                emoji_to_text[emoji_sort_exit] = "Akceptuj"
+
+                # Update embed with sorting options
+                embed.set_footer(text=make_footer(emoji_mapping=emoji_to_text))
+                await msg.edit(embed=embed)
+
+                sort_payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
+                if sort_payload is None:
+                    return
+
+                sort_selected_emoji = str(sort_payload.emoji)
+
+                if sort_selected_emoji == emoji_sort_reset:
+                    sort_key = 'match_score'
+                    sort_ascending = True
+                elif sort_selected_emoji == emoji_sort_by_title:
+                    sort_key = 'title'
+                elif sort_selected_emoji == emoji_sort_by_year:
+                    sort_key = 'year'
+                elif sort_selected_emoji == emoji_sort_by_rating:
+                    sort_key = 'rating'
+                elif sort_selected_emoji == emoji_sort_by_date_added:
+                    sort_key = 'date_added'
+                elif sort_selected_emoji == emoji_sort_descending:
+                    sort_ascending = False
+                elif sort_selected_emoji == emoji_sort_ascending:
+                    sort_ascending = True
+                elif sort_selected_emoji == emoji_sort_exit:
+                    break  # Exit sorting menu
+
+                # Re-fetch and update the movies list based on the new sort settings
+                result_movies = []
+                for site in bot.g_sites:
+                    site_movies = site.search_movies(
+                        phrase=user_input,
+                        max_items=MAX_ROWS_SEARCH,
+                        min_match_score=MIN_MATCH_SCORE if user_input else 0.0,
+                        sort_key=sort_key,
+                        reverse=not sort_ascending,
+                        limit_before_sort=True if user_input else False
+                    )
+                    result_movies.extend(site_movies)
+
+                user.movie_selection_list = result_movies
+
+                embed = make_embed(result_movies)
+                await msg.edit(embed=embed)
+
+                # Continue to display sorting options
+                footer = make_footer(emoji_mapping=emoji_to_text)
+                embed.set_footer(text=footer)
+                await msg.edit(embed=embed)
 
 
 async def movie_details(user_message: Message, bot_message: Message) -> None:
@@ -356,7 +515,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     description = (
         f"**{selected_movie.year}r\u2004|\u2004{selected_movie.length}min\u2004|\u2004{selected_movie.tags}**\n\n"
         f"{selected_movie.description}\n\n"
-        f"**Ocena: {selected_movie.rating}/10**\n"
+        f"Ocena: {selected_movie.rating}/10\n"
         f"{selected_movie.votes} głosów\n\n"
         f"Format: {selected_movie.show_type}\n"
         f"Kraje: {selected_movie.countries}\n\n"
@@ -374,7 +533,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         emoji_to_text = {add_to_watchlist_emoji: "Zapisz na liście filmów"}
 
     # Set footer, Delete User message, Edit Bot message
-    footer_text = make_footer(emoji_to_text, show_back=True)
+    footer_text = make_footer(emoji_mapping=emoji_to_text, show_back_text=True)
     embed.set_footer(text=footer_text)
     await user_message.delete()
     msg = await bot_message.edit(embed=embed)
@@ -396,10 +555,10 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         elif selected_emoji == rate_movie_emoji:
             state = user.state
             await rate_movie(user_message, bot_message)
-            time.sleep(2)
+            time.sleep(2.5)
             user.state = state
         # Update message
-        footer_text = make_footer(emoji_to_text, show_back=True)
+        footer_text = make_footer(emoji_mapping=emoji_to_text, show_back_text=True)
         embed.set_footer(text=footer_text)
         await msg.edit(embed=embed)
 
@@ -415,8 +574,8 @@ async def rate_movie(user_message: Message, bot_message: Optional[Message] = Non
     selected_movie = user.movie_selection_list[input_int - 1]
 
     await bot_message.clear_reactions()
-    rating_prompt = "Wybierz ocenę filmu (1-10):"
-    footer = make_footer({}, show_back=True)
+    rating_prompt = "Wpisz ocenę filmu (1-10):"
+    footer = make_footer(show_back_text=True)
     rating_embed = construct_embedded_message(title="Oceń Film", description=rating_prompt, footer=footer)
     await bot_message.edit(embed=rating_embed)
 
@@ -444,7 +603,8 @@ async def rate_movie(user_message: Message, bot_message: Optional[Message] = Non
 
     # Confirm rating update
     confirm_description = f"Film został oceniony na {new_rating}/10."
-    rating_embed = construct_embedded_message(title="Oceniono Film", description=confirm_description)
+    footer = make_footer(text="m.list - otwiera listę filmów")
+    rating_embed = construct_embedded_message(title="Oceniono Film", description=confirm_description, footer=footer)
     await response.delete()
     await bot_message.edit(embed=rating_embed)
 
@@ -468,12 +628,13 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     user = get_user(ctx.author.id)
     user.state = UserState.watchlist_panel
     title = f"Lista filmów ({user.display_name})"
+    msg = bot_message
 
     entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
     entries_count = len(entries)
 
     # If User message is not initial message - delete it
-    if bot_message is not None:
+    if msg is not None:
         await user_message.delete()
 
     if not entries:
@@ -503,7 +664,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
                 'rating': 'Ocena'
             }
             order = 'rosnąco' if sort_ascending else 'malejąco'
-            sorting_info = f"**Sortowanie: {sort_criteria[sort_key]} ({order})**"
+            sorting_info = f"**Sortowanie: {sort_criteria.get(sort_key, '')} ({order})**"
         else:
             sorting_info = ""
 
@@ -557,7 +718,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
 
         # Make embed and footer
         embed = make_embed(pages[current_page - 1], current_page)
-        footer = make_footer(emoji_to_text)
+        footer = make_footer(emoji_mapping=emoji_to_text)
         embed.set_footer(text=footer)
 
         if msg is None:  # If it's the first time, send a new message
@@ -597,7 +758,7 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
 
                 # Make embed and footer
                 embed = make_embed(pages[current_page - 1], current_page, show_sorting_info=True)
-                footer = make_footer(emoji_to_text)
+                footer = make_footer(emoji_mapping=emoji_to_text)
                 embed.set_footer(text=footer)
 
                 # Send updated embed with new sorting
@@ -760,11 +921,15 @@ def construct_embedded_message(*fields: str, title: str = '', description: str =
     return embed
 
 
-def make_footer(emoji_mapping: Dict[str, str], show_back: bool = False) -> str:
+def make_footer(text: str = None, show_back_text: bool = False, emoji_mapping: Optional[Dict[str, str]] = None) -> str:
     """Creates a footer string from emoji-to-text mapping."""
-    footer_parts = [f"{emoji} {text}" for emoji, text in emoji_mapping.items()]
-    if show_back:
+    footer_parts = []
+    if emoji_mapping:
+        footer_parts = [f"{emoji} {text}" for emoji, text in emoji_mapping.items()]
+    if show_back_text:
         footer_parts.append("w - powrót")
+    if text:
+        footer_parts.append(text)
     return " | ".join(footer_parts)
 
 
