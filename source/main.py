@@ -77,6 +77,7 @@ REACTION_TIMEOUT = 600.0  # Time in seconds for bot to track reactions
 bot.g_locked = False
 bot.g_users = collect_data.load_pkl(f'{USERS_PATH}/users.pkl', [])  # List of Users with Movies lists.
 bot.g_sites = []  # List of Sites with Movies data
+bot.g_task_lock = asyncio.Lock()
 
 
 @bot.event
@@ -817,25 +818,8 @@ async def get_user_reaction(
         timeout: Optional[float] = None,
         check: Callable[[discord.MessageInteraction], bool] | None = None
 ) -> Optional[discord.RawReactionActionEvent]:
-    # Cancel old task
-    if controller:
-        old_task = controller.interaction_task
-        if old_task and not old_task.done():
-            logging.debug(f"Cancelling task: name={old_task.get_name()}")
-            old_task.cancel()
-
-    # Update reactions
-    if controller or not emojis:
-        try:
-            if message.channel.type != discord.ChannelType.private:
-                await message.clear_reactions()
-            for e in emojis:
-                await message.add_reaction(e)
-        except discord.NotFound as e:  # Message not found
-            logging.warning(f"Failed to add reactions. Message not found: {e}. Message ID might be invalid or deleted.")
-
-    # CONDITIONS CHECK (1.user, 2.message, 3.emoji)
     def check_default(payload: discord.RawReactionActionEvent):
+        # CONDITIONS CHECK (1.user, 2.message, 3.emoji)
         user_id, msg_id, emoji = payload.user_id, payload.message_id, str(payload.emoji)
         id_list = [p.id for p in bot.g_users]
         return (
@@ -844,21 +828,42 @@ async def get_user_reaction(
                 and (emoji in emojis)  # 3
         )
 
-    # Create and update user task
+    # Create task
     new_task = asyncio.create_task(bot.wait_for(
         "raw_reaction_add",
         timeout=timeout,
         check=check if check is not None else check_default
-    )
-    )
-    if controller:
-        controller.interaction_task = new_task
+    ))
 
+    async with bot.g_task_lock:
+        if controller:
+            # Cancel old task if exists
+            old_task = controller.interaction_task
+            if old_task and not old_task.done():
+                old_task.cancel()
+            # Save new task
+            controller.interaction_task = new_task
+
+    # Update reactions
+    try:
+        if message.channel.type != discord.ChannelType.private:
+            await message.clear_reactions()
+        for e in emojis:
+            await message.add_reaction(e)
+    except discord.NotFound as e:
+        logging.warning(f"Failed to clear or add reactions. Message not found: {e}.")
+        return
+    except discord.HTTPException as e:
+        logging.warning(f"Failed to clear or add reactions. HTTPException: {e}")
+    
     # Wait for the reaction
     try:
         reaction_payload = await new_task
-    except asyncio.TimeoutError as e:
-        logging.debug(f"Wait for reaction timeout: {e}")
+    except asyncio.CancelledError:
+        logging.debug("Reaction task was cancelled.")
+        return None
+    except asyncio.TimeoutError:
+        logging.debug(f"Reaction task timeout")
         return None
     return reaction_payload
 
@@ -868,8 +873,8 @@ async def get_user_text(
         timeout: Optional[float] = None,
         check: Callable[[discord.MessageInteraction], bool] | None = None
 ) -> Optional[discord.Message]:
-    # CONDITIONS CHECK (1.user, 2.message)
     def check_default(message: discord.Message):
+        # CONDITIONS CHECK (1.user, 2.message)
         user_id = message.author.id
         id_list = [p.id for p in bot.g_users]
         return (user_id == controller.id if controller else user_id in id_list) and (
@@ -880,19 +885,25 @@ async def get_user_text(
         'message',
         timeout=timeout,
         check=check if check is not None else check_default
-    )
-    )
-    if controller:
-        old_task = controller.interaction_task
-        if old_task and not old_task.done():
-            logging.debug(f"Cancelling task: name={old_task.get_name()}")
-            old_task.cancel()
-        controller.interaction_task = new_task
+    ))
+
+    async with bot.g_task_lock:
+        if controller:
+            # Cancel old task if exists
+            old_task = controller.interaction_task
+            if old_task and not old_task.done():
+                old_task.cancel()
+            # Save new task
+            controller.interaction_task = new_task
 
     # Wait for the text
     try:
         message_payload = await new_task
+    except asyncio.CancelledError:
+        logging.debug("Text task was cancelled.")
+        return None
     except asyncio.TimeoutError:
+        logging.debug(f"Text task timeout")
         return None
     return message_payload
 
