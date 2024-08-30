@@ -1,5 +1,6 @@
 import asyncio
 import time
+import re
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from typing import Optional, Callable, List, Dict
@@ -13,7 +14,7 @@ import collect_data
 from dotenv import load_dotenv
 import logging
 
-from source.classes.enums import UserState
+from source.classes.enums import UserState, MovieTag
 from source.classes.movie import Movie
 from source.classes.user import User
 from source.classes.watchlist import MovieEntry
@@ -67,7 +68,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 # Constants
 TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
 USERS_PATH = "data/users"
-MAX_ROWS_SEARCH = 12  # Max number of rows showed in movie search
+MAX_ROWS_SEARCH = 15  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
 MIN_MATCH_SCORE = 40  # Minimum score of similarity in the search(0-100)
@@ -198,12 +199,6 @@ async def process_state(message: Message, user) -> None:
             message.content = user.search_query
         elif old_state == UserState.movie_details_watchlist:  # Movie details from watchlist
             user.state = UserState.watchlist_panel
-        elif old_state == UserState.rate_movie_search:  # Rate movie from search
-            message.content = user.selection_input
-            user.state = UserState.movie_details_search
-        elif old_state == UserState.rate_movie_watchlist:  # Rate movie from watchlist
-            message.content = user.selection_input
-            user.state = UserState.movie_details_watchlist
         else:
             logging.debug(f"Input: '{message.content}', Old State: '{old_state}', (returned)")
             return
@@ -245,6 +240,8 @@ async def process_state(message: Message, user) -> None:
 async def search_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
     """Search result panel shown (List of movies)"""
     # Emojis
+    emoji_filter_tag = '🎭'
+    emoji_filter_year = '🎦'
     emoji_sort = '🔀'
     emoji_sort_reset = '🔄'
     emoji_sort_exit = '🆗'
@@ -270,6 +267,9 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
     else:
         sort_ascending = False
         sort_key = 'date_added'
+
+    selected_tags = []
+    selected_years = []
 
     def make_embed(movies: List[Movie]) -> discord.Embed:
         """Create the embed message with the current search results."""
@@ -319,48 +319,149 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
                 i += 1
 
         if not movies:
-            if not user_input:
+            if not user_input and not selected_tags and not selected_years:
                 description = "Brak filmów w bazie."
             else:
-                description = f"**Wyniki: {user_input}**\n\nNie znaleziono pasujących wyników."
+                description = f"**Wyniki: {user_input}**\n\nNie znaleziono pasujących wyników.\n"
             e = construct_embedded_message(title=title, description=description)
         else:
-            # Determine the sorting description
+            # Filter description
+            filtering_info = ''
+            if selected_tags:
+                tags = ", ".join(selected_tags)
+                if len(tags) >= 100:
+                    tags = tags[:97] + '...'
+                filtering_info += f'• **Gatunek**: {tags}\n'
+
+            if selected_years:
+                years = list_to_range_string(selected_years)
+                if len(years) >= 100:
+                    years = years[:97] + '...'
+                filtering_info += f'• **Rok produkcji**: {years}\n'
+
+            if filtering_info:
+                filtering_info = '**Filtrowanie:**\n' + filtering_info
+
+            # Sort description
             sort_desc = {
                 'title': 'Tytuł',
                 'rating': 'Ocena',
                 'year': 'Rok'
             }
-
             if sort_key == 'date_added':
                 if sort_ascending:
-                    sorting_info = '**Sortowanie: Data dodania (rosnąco)**\n'
+                    sorting_info = '**Sortowanie:\n• Najdawniej dodane**\n'
                 else:
                     if user_input:
-                        sorting_info = '**Sortowanie: Data dodania (malejąco)**\n'
+                        sorting_info = '**Sortowanie:\n• Ostatnio dodane**\n'
                     else:
                         sorting_info = '**Ostatnio dodane:**\n'  # Default sort text for empty m.search command
             elif sort_key != 'match_score':
                 key = sort_key.split('_')[0]  # Extract part before '_'
                 sort_label = sort_desc.get(key, '')
                 order_label = 'rosnąco' if sort_ascending else 'malejąco'
-                sorting_info = f'**Sortowanie: {sort_label} ({order_label})**\n'
+                sorting_info = f'**Sortowanie:\n• {sort_label}**: {order_label}\n'
             else:
                 sorting_info = ''
 
             # Create description based on user_input
             if user_input:
-                description = f"{sorting_info}\n**Wyniki: {user_input}**\n\n"
+                description = f"{filtering_info}{sorting_info}\n**Wyniki: {user_input}**\n\n"
             else:
                 description = (
                     "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
-                    f"Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n{sorting_info}\n\n"
+                    f"Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n{filtering_info}{sorting_info}\n\n"
                 )
 
             # Construct the embed message
             e = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
                                            description=description)
         return e
+
+    def get_tags_from_input(input_str: str) -> List[str]:
+        """Convert user input (numbers or tag names) to a list of MovieTag names as strings."""
+        tags = []
+        input_parts = input_str.split(',')
+        tag_map = {str(x): t for x, t in enumerate(MovieTag, start=1)}  # Map numbers to tags
+
+        for p in input_parts:
+            p = p.strip().lower()
+
+            if p.isdigit() and p in tag_map:  # If it's a number and in the tag map
+                tags.append(tag_map[p].value)
+            else:
+                for t in MovieTag:
+                    if t.value.lower() == p:  # If it's a tag name
+                        tags.append(t.value)
+                        break
+        return tags
+
+    def get_years_from_input(input_str: str) -> List[int]:
+        """
+        Convert a string containing years and year ranges (e.g., "2000-2002, 2003, 2005-2006")
+        into a sorted list of individual years.
+        """
+        min_year = 1900
+        max_year = 2100
+
+        years = []
+        input_parts = input_str.split(',')
+
+        for p in input_parts:
+            p = p.strip()
+
+            if '-' in p:  # Handle year range (e.g., "2000-2002")
+                y_start_str, y_end_str = p.split('-')
+
+                if not y_start_str.isdigit() or not y_end_str.isdigit():
+                    continue
+
+                y_start, y_end = int(y_start_str), int(y_end_str)
+
+                if y_start > y_end:  # Swap if the range is given in reverse
+                    y_start, y_end = y_end, y_start
+
+                # Limit the range to valid years
+                if y_start < min_year:
+                    y_start = min_year
+                if y_end > max_year:
+                    y_end = max_year
+
+                years.extend(range(y_start, y_end + 1))
+            else:  # Handle single year (e.g., "2003")
+                if not p.isdigit():
+                    continue
+                year = int(p)
+                if min_year <= year <= max_year:
+                    years.append(year)
+
+        return sorted(years)
+
+    def list_to_range_string(numbers):
+        if not numbers:
+            return ""
+
+        numbers = sorted(numbers)
+        ranges = []
+        start = numbers[0]
+        end = numbers[0]
+
+        for n in numbers[1:]:
+            if n == end + 1:
+                end = n
+            else:
+                if start == end:
+                    ranges.append(f"{start}")
+                else:
+                    ranges.append(f"{start}-{end}")
+                start = end = n
+
+        if start == end:
+            ranges.append(f"{start}")
+        else:
+            ranges.append(f"{start}-{end}")
+
+        return ", ".join(ranges)
 
     # Delete the user's message if the function wasn't triggered by a command.
     if msg:
@@ -371,14 +472,16 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
         # Perform the search with sorting
         result_movies = []
         for site in bot.g_sites:
-            # get specific search result if there is input or get all movies if there is no input
+            # Get specific search result if there is input or search for all movies if there is no input
             site_movies = site.search_movies(
                 phrase=user_input,
                 max_items=MAX_ROWS_SEARCH,
                 min_match_score=MIN_MATCH_SCORE if user_input else 0.0,
                 sort_key=sort_key,
                 reverse=not sort_ascending,
-                limit_before_sort=True if user_input else False
+                limit_before_sort=True if user_input else False,
+                filter_tags=selected_tags,
+                filter_years=selected_years
             )
             result_movies.extend(site_movies)
 
@@ -386,6 +489,8 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
 
         embed = make_embed(result_movies)
         emoji_to_text = {
+            emoji_filter_tag: "Filtruj (Gatunek)",
+            emoji_filter_year: "Filtruj (Rok produkcji)",
             emoji_sort: "Sortuj",
         }
         footer = make_footer(emoji_mapping=emoji_to_text)
@@ -433,6 +538,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
                 emoji_to_text[emoji_sort_exit] = "Akceptuj"
 
                 # Update embed with sorting options
+                embed = make_embed(result_movies)
                 embed.set_footer(text=make_footer(emoji_mapping=emoji_to_text))
                 await msg.edit(embed=embed)
 
@@ -469,19 +575,93 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
                         min_match_score=MIN_MATCH_SCORE if user_input else 0.0,
                         sort_key=sort_key,
                         reverse=not sort_ascending,
-                        limit_before_sort=True if user_input else False
+                        limit_before_sort=True if user_input else False,
+                        filter_tags=selected_tags,
+                        filter_years=selected_years
                     )
                     result_movies.extend(site_movies)
 
                 user.movie_selection_list = result_movies
 
-                embed = make_embed(result_movies)
-                await msg.edit(embed=embed)
+        elif selected_emoji == emoji_filter_tag:  # Filter by tag
+            user.state = UserState.input_search_filter
 
-                # Continue to display sorting options
-                footer = make_footer(emoji_mapping=emoji_to_text)
-                embed.set_footer(text=footer)
-                await msg.edit(embed=embed)
+            await msg.clear_reactions()
+
+            # Make list of tags from MovieTag Enum
+            lines = []
+            for i, tag in enumerate(MovieTag, start=1):
+                lines.append(f"{i}. {tag.value}")
+            tag_list = "\n".join(lines)
+
+            # Edit message
+            filter_prompt = (
+                f"Wprowadź gatunki z listy lub ich numery (np. '1,2,8', lub 'horror, dramat'):\n\n{tag_list}"
+            )
+            footer = make_footer(show_back_text=True)
+            filter_embed = construct_embedded_message(title="Filtrowanie (Gatunek)", description=filter_prompt,
+                                                      footer=footer)
+            await msg.edit(embed=filter_embed)
+
+            # Get User input
+            response = await get_user_text(user,REACTION_TIMEOUT)
+
+            if response is None:  # Timeout
+                timeout_description = "Czas na wprowadzenie tekstu upłynął."
+                filter_embed = construct_embedded_message(title="Filtrowanie (Gatunek)",
+                                                          description=timeout_description)
+                await msg.edit(embed=filter_embed)
+                return
+
+            if response.content == 'w':  # Go back
+                await response.delete()
+                user.state = UserState.search_movie
+                continue
+
+            # Process the filter text
+            selected_tags = get_tags_from_input(response.content)
+
+            await response.delete()
+            user.state = UserState.search_movie
+
+        elif selected_emoji == emoji_filter_year:  # Filter by year
+            user.state = UserState.input_search_filter
+
+            await msg.clear_reactions()
+
+            filter_prompt = 'Wprowadź rok lub zakres lat (np. 2000-2005, 2012, 2024)'
+            footer = make_footer(show_back_text=True)
+            filter_embed = construct_embedded_message(title="Filtrowanie (Rok wydania)", description=filter_prompt, footer=footer)
+            await msg.edit(embed=filter_embed)
+
+            pattern = r'^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$'
+
+            response = await get_user_text(
+                user,
+                REACTION_TIMEOUT,
+                check=(
+                    lambda m: m.author == user_message.author
+                    and m.channel.id == msg.channel.id
+                    and (bool(re.match(pattern, m.content)) or m.content == 'w')
+                )
+            )
+
+            if response is None:  # Timeout
+                timeout_description = "Czas na wprowadzenie tekstu upłynął."
+                filter_embed = construct_embedded_message(title="Filtrowanie (Rok produkcji)", description=timeout_description)
+                await msg.edit(embed=filter_embed)
+                return
+
+            if response.content == 'w':  # Go back
+                await response.delete()
+                user.state = UserState.search_movie
+                continue
+
+            # Process the filter text
+            selected_years = get_years_from_input(response.content)
+
+            await response.delete()
+            user.state = UserState.search_movie
 
 
 async def movie_details(user_message: Message, bot_message: Message) -> None:
@@ -564,10 +744,11 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         await msg.edit(embed=embed)
 
 
-async def rate_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
+async def rate_movie(user_message: Message, bot_message: Message) -> None:
     # Prompt user to enter rating
     user = get_user(user_message.author.id)
-    if user.state == UserState.movie_details_watchlist:
+    old_state = user.state
+    if old_state == UserState.movie_details_watchlist:
         user.state = UserState.rate_movie_watchlist
     else:
         user.state = UserState.rate_movie_search
@@ -586,16 +767,19 @@ async def rate_movie(user_message: Message, bot_message: Optional[Message] = Non
         REACTION_TIMEOUT,
         check=(
             lambda m: m.author == user_message.author
-            and m.content.replace(".", "", 1).isdigit()
-            and 1 <= float(m.content) <= 10
+            and ((m.content.replace(".", "", 1).isdigit() and 1 <= float(m.content) <= 10) or (m.content == 'w'))
             and m.channel.id == bot_message.channel.id
         )
-
     )
     if response is None:
         timeout_description = "Czas na ocenę filmu upłynął."
         rating_embed = construct_embedded_message(title="Oceń Film", description=timeout_description)
         await bot_message.edit(embed=rating_embed)
+        return
+
+    if response.content == 'w':  # Go back
+        await response.delete()
+        user.state = old_state
         return
 
     # Update rating
@@ -855,7 +1039,7 @@ async def get_user_reaction(
         return
     except discord.HTTPException as e:
         logging.warning(f"Failed to clear or add reactions. HTTPException: {e}")
-    
+
     # Wait for the reaction
     try:
         reaction_payload = await new_task

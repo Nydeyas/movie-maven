@@ -93,6 +93,14 @@ class MovieSite:
         sorted_movies = self.movies[::-1] if reverse else self.movies[:]
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
 
+    def filter_movies_by_tags(self, movies: List[Movie], selected_tags: List[str]) -> List[Movie]:
+        """Filter movies by tags."""
+        return [movie for movie in movies if all(tag in movie.tags for tag in selected_tags)]
+
+    def filter_movies_by_years(self, movies: List[Movie], selected_years: List[int]) -> List[Movie]:
+        """Filter movies by years."""
+        return [movie for movie in movies if movie.year in selected_years]
+
     def search_movies(
             self,
             phrase: str,
@@ -100,7 +108,9 @@ class MovieSite:
             min_match_score: float = 0.0,
             sort_key: str = 'match_score',
             reverse: bool = False,
-            limit_before_sort: bool = False
+            limit_before_sort: bool = False,
+            filter_tags: Optional[List[str]] = None,
+            filter_years: Optional[List[int]] = None
     ) -> List[Movie]:
         """
         Search for movies that match a given phrase and return a sorted list of results based on the match score.
@@ -119,6 +129,8 @@ class MovieSite:
         - sort_key (str): The key to sort the movies by. Can be 'match_score', 'date_added', 'year', 'title', 'rating'.
         - reverse (bool): If True, sorts the list in descending order based on the sort key.
         - limit_before_sort (bool): If True, limits the number of items before sorting. If False, limits after sorting.
+        - selected_tags (Optional[List[str]]): Filter movies based on these selected tags.
+        - selected_years (Optional[List[int]]): Filter movies based on these selected years.
 
         Returns:
         - List[Movie]: A list of movies sorted by match score in descending order.
@@ -140,6 +152,12 @@ class MovieSite:
 
         # Extract movies only
         movies_sorted_by_score = [movie for movie, score in sorted_movies_with_scores]
+
+        # Apply filtering based on tags and years
+        if filter_tags:
+            movies_sorted_by_score = self.filter_movies_by_tags(movies_sorted_by_score, filter_tags)
+        if filter_years:
+            movies_sorted_by_score = self.filter_movies_by_years(movies_sorted_by_score, filter_years)
 
         # Limit the number of items before sorting if limit_before_sort is True
         if limit_before_sort and max_items is not None:
