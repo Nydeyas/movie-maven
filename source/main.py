@@ -260,16 +260,25 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
     user.search_query = user_input
     msg = bot_message
 
-    # Default sorting parameters
-    if user_input:
-        sort_ascending = True
-        sort_key = 'match_score'
-    else:
-        sort_ascending = False
-        sort_key = 'date_added'
-
-    selected_tags = []
-    selected_years = []
+    # Sorting and filtering settings
+    if bot_message:  # continue searching
+        sort_ascending = user.sort_ascending_search
+        sort_key = user.sort_key_search
+        selected_tags = user.filter_tags
+        selected_years = user.filter_years
+    else:  # new search
+        if user_input:
+            sort_ascending = True
+            sort_key = 'match_score'
+        else:
+            sort_ascending = False
+            sort_key = 'date_added'
+        selected_tags = []
+        selected_years = []
+        user.sort_ascending_search = True
+        user.sort_key_search = 'match_score'
+        user.filter_tags.clear()
+        user.filter_years.clear()
 
     def make_embed(movies: List[Movie]) -> discord.Embed:
         """Create the embed message with the current search results."""
@@ -346,7 +355,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
             sort_desc = {
                 'title': 'Tytuł',
                 'rating': 'Ocena',
-                'year': 'Rok'
+                'year': 'Rok produkcji'
             }
             if sort_key == 'date_added':
                 if sort_ascending:
@@ -513,16 +522,16 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
             while True:
                 # Prepare sorting options based on the current sort key
                 sort_options = {
-                    'match_score': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku wydania",
+                    'match_score': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku produkcji",
                                     emoji_sort_by_rating: "Sortuj po Ocenie",
                                     emoji_sort_by_date_added: "Sortuj po dacie dodania"},
-                    'title': {emoji_sort_by_year: "Sortuj po Roku wydania", emoji_sort_by_rating: "Sortuj po Ocenie",
+                    'title': {emoji_sort_by_year: "Sortuj po Roku produkcji", emoji_sort_by_rating: "Sortuj po Ocenie",
                               emoji_sort_by_date_added: "Sortuj po dacie dodania"},
                     'year': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_rating: "Sortuj po Ocenie",
                              emoji_sort_by_date_added: "Sortuj po dacie dodania"},
-                    'rating': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku wydania",
+                    'rating': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku produkcji",
                                emoji_sort_by_date_added: "Sortuj po dacie dodania"},
-                    'date_added': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku wydania",
+                    'date_added': {emoji_sort_by_title: "Sortuj po Tytule", emoji_sort_by_year: "Sortuj po Roku produkcji",
                                    emoji_sort_by_rating: "Sortuj po Ocenie"}
                 }
                 emoji_to_text = sort_options.get(sort_key, {})
@@ -565,6 +574,9 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
                     sort_ascending = True
                 elif sort_selected_emoji == emoji_sort_exit:
                     break  # Exit sorting menu
+
+                user.sort_key_search = sort_key
+                user.sort_ascending_search = sort_ascending
 
                 # Re-fetch and update the movies list based on the new sort settings
                 result_movies = []
@@ -620,6 +632,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
 
             # Process the filter text
             selected_tags = get_tags_from_input(response.content)
+            user.filter_tags = selected_tags
 
             await response.delete()
             user.state = UserState.search_movie
@@ -631,7 +644,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
 
             filter_prompt = 'Wprowadź rok lub zakres lat (np. 2000-2005, 2012, 2024)'
             footer = make_footer(show_back_text=True)
-            filter_embed = construct_embedded_message(title="Filtrowanie (Rok wydania)", description=filter_prompt, footer=footer)
+            filter_embed = construct_embedded_message(title="Filtrowanie (Rok produkcji)", description=filter_prompt, footer=footer)
             await msg.edit(embed=filter_embed)
 
             pattern = r'^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$'
@@ -659,6 +672,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
 
             # Process the filter text
             selected_years = get_years_from_input(response.content)
+            user.filter_years = selected_years
 
             await response.delete()
             user.state = UserState.search_movie
@@ -815,12 +829,18 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     title = f"Lista filmów ({user.display_name})"
     msg = bot_message
 
-    entries = user.watchlist.get_entries_sorted_by_title()  # Default sort by title
-    entries_count = len(entries)
-
-    # If User message is not initial message - delete it
-    if msg is not None:
+    if msg:  # continue
+        sort_ascending = user.sort_ascending_watchlist
+        sort_key = user.sort_key_watchlist
         await user_message.delete()
+    else:  # new
+        sort_ascending = True  # Default sorting order
+        sort_key = 'title'  # Default sorting key
+        user.sort_ascending_watchlist = sort_ascending
+        user.sort_key_watchlist = sort_key
+
+    entries = user.watchlist.get_entries(sort_key=sort_key, reverse=not sort_ascending)
+    entries_count = len(entries)
 
     if not entries:
         description = "**Twoja lista jest pusta.**\n" \
@@ -829,16 +849,6 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
         # Send embedded message
         await channel.send(embed=embed)
         return
-
-    def update_entries():
-        """Update entries based on the current sort key and order"""
-        nonlocal entries
-        if sort_key == 'title':
-            entries = user.watchlist.get_entries_sorted_by_title(reverse=not sort_ascending)
-        elif sort_key == 'date_added':
-            entries = user.watchlist.get_entries_sorted_by_date(reverse=not sort_ascending)
-        elif sort_key == 'rating':
-            entries = user.watchlist.get_entries_sorted_by_rating(reverse=not sort_ascending)
 
     def make_embed(page_entries: List[MovieEntry], page_number: int, show_sorting_info: bool = False) -> discord.Embed:
         # Generate the sorting description if requested
@@ -886,9 +896,6 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, entries_count, MAX_ROWS_WATCHLIST)]
     pages_count = len(pages)
     current_page = 1
-    sort_ascending = True  # Default sorting order
-    sort_key = 'title'  # Default sorting key
-    msg = None  # Initialize the message variable
 
     while True:  # Main loop
         # Prepare emojis based on the current page
@@ -957,21 +964,20 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
 
                 if sort_selected_emoji == emoji_sort_by_title:
                     sort_key = 'title'
-                    update_entries()
                 elif sort_selected_emoji == emoji_sort_by_date_added:
                     sort_key = 'date_added'
-                    update_entries()
                 elif sort_selected_emoji == emoji_sort_by_rating:
                     sort_key = 'rating'
-                    update_entries()
                 elif sort_selected_emoji == emoji_sort_descending:
                     sort_ascending = False
-                    update_entries()
                 elif sort_selected_emoji == emoji_sort_ascending:
                     sort_ascending = True
-                    update_entries()
                 elif sort_selected_emoji == emoji_sort_exit:
                     break  # Exit the sorting menu
+
+                user.sort_key_watchlist = sort_key
+                user.sort_ascending_watchlist = sort_ascending
+                entries = user.watchlist.get_entries(sort_key=sort_key, reverse=not sort_ascending)
 
                 # Update pages and page count
                 pages = [entries[i:i + MAX_ROWS_WATCHLIST] for i in range(0, len(entries), MAX_ROWS_WATCHLIST)]

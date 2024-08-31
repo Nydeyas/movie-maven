@@ -79,6 +79,17 @@ class Watchlist:
 
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 
+    def get_entries(self, sort_key: str = 'title', reverse: bool = False):
+        if sort_key == 'title':
+            entries = self.get_entries_sorted_by_title(reverse=reverse)
+        elif sort_key == 'date_added':
+            entries = self.get_entries_sorted_by_date(reverse=reverse)
+        elif sort_key == 'rating':
+            entries = self.get_entries_sorted_by_rating(reverse=reverse)
+        else:
+            raise ValueError(f"Unknown sort_key: {sort_key}")
+        return entries
+
     def get_movies(self, max_items: Optional[int] = None) -> List[Movie]:
         movies = [entry.movie for entry in self.entries]
         return movies[:max_items] if max_items is not None else movies

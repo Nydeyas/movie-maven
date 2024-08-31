@@ -19,6 +19,12 @@ class User:
         self.movie_selection_list: List[Movie] = []
         self.selection_input: str = ''
         self.search_query: str = ''
+        self.filter_tags: List[str] = []
+        self.filter_years: List[str] = []
+        self.sort_key_search: str = ''
+        self.sort_ascending_search: bool
+        self.sort_key_watchlist: str = ''
+        self.sort_ascending_watchlist: bool
         self.message_id: int = 0
         self.interaction_task: Optional[Union[
             asyncio.Task[discord.RawReactionActionEvent],
