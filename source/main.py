@@ -14,7 +14,7 @@ import collect_data
 from dotenv import load_dotenv
 import logging
 
-from source.classes.enums import UserState, MovieTag
+from source.classes.enums import UserState, MovieTag, MovieTagColor
 from source.classes.movie import Movie
 from source.classes.user import User
 from source.classes.watchlist import MovieEntry
@@ -68,7 +68,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 # Constants
 TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
 USERS_PATH = "data/users"
-MAX_ROWS_SEARCH = 15  # Max number of rows showed in movie search
+MAX_ROWS_SEARCH = 20  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
 MIN_MATCH_SCORE = 40  # Minimum score of similarity in the search(0-100)
@@ -717,8 +717,19 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         f"Link: {selected_movie.link}\n\n"
     )
 
-    # Make embedded message
-    embed = construct_embedded_message(title=selected_movie.title, description=description)
+    # Embed Colour
+    colour = None
+    if selected_movie.tags:
+        tag_value = selected_movie.tags.split(",")[0]
+        tag = next((t for t in MovieTag if t.value == tag_value), None)
+        if tag:
+            colour = MovieTagColor[tag.name].value
+
+    # Make Embed
+    if isinstance(colour, int):
+        embed = construct_embedded_message(title=selected_movie.title, description=description, colour=colour)
+    else:
+        embed = construct_embedded_message(title=selected_movie.title, description=description)
     embed.set_image(url=selected_movie.image_link)
 
     # Prepare reaction emojis
