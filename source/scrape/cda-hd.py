@@ -78,7 +78,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
                     length = int(length_str) if length_str.isdigit() else None
 
                     rating_str = browser.find_element(By.XPATH, "//*[@id='uwee']/div[2]/div[2]/a/div/span").text
-                    rating = float(rating_str) if rating_str.replace('.', '', 1).isdigit() else "N/A"
+                    rating = float(rating_str) if rating_str.replace('.', '', 1).isdigit() else None
 
                     votes_text = browser.find_element(By.XPATH, "//*[@id='uwee']/div[2]/div[2]/div/span/b[2]").text
                     votes_str = find_first_number(votes_text)
@@ -113,7 +113,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
         logging.warning(f"Error scraping movies: {e}")
 
     finally:
-        browser.close()
+        browser.quit()
 
     b = datetime.now()
     logging.info(f"cda-hd.get_movies() completed: {b - a}")

@@ -83,7 +83,9 @@ class MovieSite:
         locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
         sorted_movies = sorted(
             self.movies,
-            key=lambda m: ((m.year, locale.strxfrm(m.title)) if not reverse else (-m.year, locale.strxfrm(m.title))),
+            key=lambda m: (replace_none(m.year, 1900), locale.strxfrm(m.title))
+            if not reverse
+            else (-replace_none(m.year, 1900), locale.strxfrm(m.title)),
             reverse=False  # Sort by the primary key as adjusted
         )
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
