@@ -6,7 +6,7 @@ from logging.handlers import TimedRotatingFileHandler
 from typing import Optional, Callable, List, Dict
 
 import discord
-from discord import Message, File
+from discord import File
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
 import os
@@ -66,7 +66,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
                                help_command=help_command)
 
 # Constants
-TEXT_CHANNELS = [1267279190206451752, 1267248186410406023]  # Discord channels IDs where the bot will operate
+TEXT_CHANNELS = [1267279190206451752, 1267248186410406023, 1279930397018427434]  # Discord channels IDs
 USERS_PATH = "data/users"
 MAX_ROWS_SEARCH = 20  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
@@ -132,7 +132,13 @@ async def search(ctx: Context, *title: Optional[str]) -> None:
 
         search_query = ' '.join(title) if title else ''
         ctx.message.content = search_query
-        await search_movie(ctx.message)
+
+        user = get_user(ctx.author.id)
+        fetched_message = await fetch_message(channel=ctx.channel, message_id=user.message_id)
+        if fetched_message is not None:
+            await fetched_message.delete()
+
+        await search_movie(ctx.message, is_command=True)
 
 
 @bot.command(aliases=['list', 'lista', 'w', 'wl', 'l'], brief='Lista filmów użytkownika',
@@ -142,11 +148,17 @@ async def watchlist(ctx: Context) -> None:
         if not is_user(ctx.author.id):
             # Add new User
             bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
-        await watchlist_panel(ctx.message)
+
+        user = get_user(ctx.author.id)
+        fetched_message = await fetch_message(channel=ctx.channel, message_id=user.message_id)
+        if fetched_message is not None:
+            await fetched_message.delete()
+
+        await watchlist_panel(ctx.message, is_command=True)
 
 
 @bot.event
-async def on_message(message: Message) -> None:
+async def on_message(message: discord.Message) -> None:
     """Main message event handler."""
     if (
             bot.g_locked
@@ -167,7 +179,7 @@ async def on_message(message: Message) -> None:
     await bot.process_commands(message)
 
 
-async def process_state(message: Message, user) -> None:
+async def process_state(message: discord.Message, user: User) -> None:
     """Handles user input and executes the appropriate state handler."""
     old_state = user.state
     blacklist = [UserState.idle]
@@ -226,18 +238,31 @@ async def process_state(message: Message, user) -> None:
         logging.warning(f"Unknown UserState: {new_state}")
         return
 
-    try:
-        fetched_message = await message.channel.fetch_message(user.message_id)
-        logging.debug(f"Running handler: {handler.__name__}, Channel: '{str(message.channel)}'")
-        await handler(message, fetched_message)
-    except discord.HTTPException as err:
-        logging.warning(f"Error fetching message ({message.channel}): {err}")
+    fetched_message = await fetch_message(channel=message.channel, message_id=user.message_id)
+    if fetched_message is None:
         user.state = UserState.idle
-    except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        return
+
+    logging.debug(f"Running handler: {handler.__name__}, Channel: '{str(message.channel)}'")
+    await handler(message, fetched_message)
 
 
-async def search_movie(user_message: Message, bot_message: Optional[Message] = None) -> None:
+async def fetch_message(channel: discord.TextChannel, message_id: int) -> discord.Message | None:
+    try:
+        fetched_message = await channel.fetch_message(message_id)
+        return fetched_message
+    except discord.NotFound as err:
+        logging.warning(f"Message with ID {message_id} not found in channel {channel}. {err}")
+    except Exception as err:
+        logging.error(f"Unexpected error: {err}", exc_info=True)
+    return None
+
+
+async def search_movie(
+        user_message: discord.Message,
+        bot_message: Optional[discord.Message] = None,
+        is_command: bool = False
+) -> None:
     """Search result panel shown (List of movies)"""
     # Emojis
     emoji_filter_tag = '🎭'
@@ -261,12 +286,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
     msg = bot_message
 
     # Sorting and filtering settings
-    if bot_message:  # continue searching
-        sort_ascending = user.sort_ascending_search
-        sort_key = user.sort_key_search
-        selected_tags = user.filter_tags
-        selected_years = user.filter_years
-    else:  # new search
+    if is_command:  # new search
         if user_input:
             sort_ascending = True
             sort_key = 'match_score'
@@ -279,6 +299,18 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
         user.sort_key_search = 'match_score'
         user.filter_tags.clear()
         user.filter_years.clear()
+    else:  # continue searching
+        if user_input:
+            sort_ascending = user.sort_ascending_search
+            sort_key = user.sort_key_search
+        else:
+            sort_ascending = False
+            sort_key = 'date_added'
+        selected_tags = user.filter_tags
+        selected_years = user.filter_years
+
+        # Delete User Message
+        await user_message.delete()
 
     def make_embed(movies: List[Movie]) -> discord.Embed:
         """Create the embed message with the current search results."""
@@ -471,10 +503,6 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
             ranges.append(f"{start}-{end}")
 
         return ", ".join(ranges)
-
-    # Delete the user's message if the function wasn't triggered by a command.
-    if msg:
-        await user_message.delete()
 
     # Main loop for handling user interactions
     while True:
@@ -678,7 +706,7 @@ async def search_movie(user_message: Message, bot_message: Optional[Message] = N
             user.state = UserState.search_movie
 
 
-async def movie_details(user_message: Message, bot_message: Message) -> None:
+async def movie_details(user_message: discord.Message, bot_message: discord.Message) -> None:
     """Individual movie panel"""
     add_to_watchlist_emoji = '📥'
     remove_from_watchlist_emoji = '📤'
@@ -700,6 +728,8 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
     if input_int not in range(1, len(user.movie_selection_list) + 1):
         description = "**Wprowadzono liczbę poza zakresem.**\n\n"
         embed = construct_embedded_message(title=title, description=description)
+        footer = make_footer(show_back_text=True)
+        embed.set_footer(text=footer)
         await user_message.delete()
         await bot_message.edit(embed=embed)
         return
@@ -769,7 +799,7 @@ async def movie_details(user_message: Message, bot_message: Message) -> None:
         await msg.edit(embed=embed)
 
 
-async def rate_movie(user_message: Message, bot_message: Message) -> None:
+async def rate_movie(user_message: discord.Message, bot_message: discord.Message) -> None:
     # Prompt user to enter rating
     user = get_user(user_message.author.id)
     old_state = user.state
@@ -819,7 +849,11 @@ async def rate_movie(user_message: Message, bot_message: Message) -> None:
     await bot_message.edit(embed=rating_embed)
 
 
-async def watchlist_panel(user_message: Message, bot_message: Optional[Message] = None) -> None:
+async def watchlist_panel(
+        user_message: discord.Message,
+        bot_message: Optional[discord.Message] = None,
+        is_command: bool = False
+) -> None:
     """Main panel of the watchlist with sorting and pagination"""
     # Emojis
     emoji_previous_page = '⬅'
@@ -840,15 +874,16 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
     title = f"Lista filmów ({user.display_name})"
     msg = bot_message
 
-    if msg:  # continue
-        sort_ascending = user.sort_ascending_watchlist
-        sort_key = user.sort_key_watchlist
-        await user_message.delete()
-    else:  # new
+    if is_command:  # new
         sort_ascending = True  # Default sorting order
         sort_key = 'title'  # Default sorting key
         user.sort_ascending_watchlist = sort_ascending
         user.sort_key_watchlist = sort_key
+    else:
+        sort_ascending = user.sort_ascending_watchlist
+        sort_key = user.sort_key_watchlist
+
+        await user_message.delete()
 
     entries = user.watchlist.get_entries(sort_key=sort_key, reverse=not sort_ascending)
     entries_count = len(entries)
@@ -857,8 +892,13 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
         description = "**Twoja lista jest pusta.**\n" \
                       "Skorzystaj z komendy **m.szukaj**, aby wyszukać i dodać wybrane przez siebie filmy."
         embed = construct_embedded_message(title=title, description=description, colour=0xdfc118)
-        # Send embedded message
-        await channel.send(embed=embed)
+
+        if msg is None:
+            msg = await channel.send(embed=embed)
+            user.message_id = msg.id
+        else:
+            await msg.edit(embed=embed)
+        user.movie_selection_list = []
         return
 
     def make_embed(page_entries: List[MovieEntry], page_number: int, show_sorting_info: bool = False) -> discord.Embed:
@@ -927,9 +967,9 @@ async def watchlist_panel(user_message: Message, bot_message: Optional[Message] 
         if msg is None:  # If it's the first time, send a new message
             msg = await channel.send(embed=embed)
             user.message_id = msg.id
-            user.movie_selection_list = [e.movie for e in entries]
         else:  # Otherwise, edit the existing message
             await msg.edit(embed=embed)
+        user.movie_selection_list = [e.movie for e in entries]
 
         # Get User reaction emoji
         payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
@@ -1051,11 +1091,11 @@ async def get_user_reaction(
             await message.clear_reactions()
         for e in emojis:
             await message.add_reaction(e)
-    except discord.NotFound as e:
-        logging.warning(f"Failed to clear or add reactions. Message not found: {e}.")
+    except discord.NotFound as err:
+        logging.warning(f"Failed to clear or add reactions. Message not found: {err}.")
         return
-    except discord.HTTPException as e:
-        logging.warning(f"Failed to clear or add reactions. HTTPException: {e}")
+    except discord.HTTPException as err:
+        logging.warning(f"Failed to clear or add reactions. HTTPException: {err}")
 
     # Wait for the reaction
     try:

@@ -22,9 +22,9 @@ class User:
         self.filter_tags: List[str] = []
         self.filter_years: List[str] = []
         self.sort_key_search: str = ''
-        self.sort_ascending_search: bool
+        self.sort_ascending_search: bool = True
         self.sort_key_watchlist: str = ''
-        self.sort_ascending_watchlist: bool
+        self.sort_ascending_watchlist: bool = True
         self.message_id: int = 0
         self.interaction_task: Optional[Union[
             asyncio.Task[discord.RawReactionActionEvent],
