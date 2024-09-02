@@ -18,6 +18,8 @@ from source.classes.enums import UserState, MovieTag, MovieTagColor
 from source.classes.movie import Movie
 from source.classes.user import User
 from source.classes.watchlist import MovieEntry
+from source.discord_utils import clear_reactions, edit_message, fetch_message, delete_message, add_reaction, \
+    send_message
 
 # Logging
 # Set up the log file handler to rotate daily
@@ -136,7 +138,7 @@ async def search(ctx: Context, *title: Optional[str]) -> None:
         user = get_user(ctx.author.id)
         fetched_message = await fetch_message(channel=ctx.channel, message_id=user.message_id)
         if fetched_message is not None:
-            await fetched_message.delete()
+            await delete_message(fetched_message)
 
         await search_movie(ctx.message, is_command=True)
 
@@ -152,7 +154,7 @@ async def watchlist(ctx: Context) -> None:
         user = get_user(ctx.author.id)
         fetched_message = await fetch_message(channel=ctx.channel, message_id=user.message_id)
         if fetched_message is not None:
-            await fetched_message.delete()
+            await delete_message(fetched_message)
 
         await watchlist_panel(ctx.message, is_command=True)
 
@@ -247,17 +249,6 @@ async def process_state(message: discord.Message, user: User) -> None:
     await handler(message, fetched_message)
 
 
-async def fetch_message(channel: discord.TextChannel, message_id: int) -> discord.Message | None:
-    try:
-        fetched_message = await channel.fetch_message(message_id)
-        return fetched_message
-    except discord.NotFound as err:
-        logging.warning(f"Message with ID {message_id} not found in channel {channel}. {err}")
-    except Exception as err:
-        logging.error(f"Unexpected error: {err}", exc_info=True)
-    return None
-
-
 async def search_movie(
         user_message: discord.Message,
         bot_message: Optional[discord.Message] = None,
@@ -309,8 +300,7 @@ async def search_movie(
         selected_tags = user.filter_tags
         selected_years = user.filter_years
 
-        # Delete User Message
-        await user_message.delete()
+        await delete_message(user_message)
 
     def make_embed(movies: List[Movie]) -> discord.Embed:
         """Create the embed message with the current search results."""
@@ -534,10 +524,10 @@ async def search_movie(
         embed.set_footer(text=footer)
 
         if msg is None:
-            msg = await channel.send(embed=embed)
+            msg = await send_message(channel=channel, embed=embed)
             user.message_id = msg.id
         else:
-            await msg.edit(embed=embed)
+            await edit_message(message=msg, embed=embed)
 
         # Get user reaction for sorting
         payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
@@ -577,7 +567,7 @@ async def search_movie(
                 # Update embed with sorting options
                 embed = make_embed(result_movies)
                 embed.set_footer(text=make_footer(emoji_mapping=emoji_to_text))
-                await msg.edit(embed=embed)
+                await edit_message(message=msg, embed=embed)
 
                 sort_payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
                 if sort_payload is None:
@@ -626,7 +616,7 @@ async def search_movie(
         elif selected_emoji == emoji_filter_tag:  # Filter by tag
             user.state = UserState.input_search_filter
 
-            await msg.clear_reactions()
+            await clear_reactions(msg)
 
             # Make list of tags from MovieTag Enum
             lines = []
@@ -641,7 +631,7 @@ async def search_movie(
             footer = make_footer(show_back_text=True)
             filter_embed = construct_embedded_message(title="Filtrowanie (Gatunek)", description=filter_prompt,
                                                       footer=footer)
-            await msg.edit(embed=filter_embed)
+            await edit_message(message=msg, embed=filter_embed)
 
             # Get User input
             response = await get_user_text(user,REACTION_TIMEOUT)
@@ -650,11 +640,11 @@ async def search_movie(
                 timeout_description = "Czas na wprowadzenie tekstu upłynął."
                 filter_embed = construct_embedded_message(title="Filtrowanie (Gatunek)",
                                                           description=timeout_description)
-                await msg.edit(embed=filter_embed)
+                await edit_message(message=msg, embed=filter_embed)
                 return
 
             if response.content == 'w':  # Go back
-                await response.delete()
+                await delete_message(response)
                 user.state = UserState.search_movie
                 continue
 
@@ -662,18 +652,18 @@ async def search_movie(
             selected_tags = get_tags_from_input(response.content)
             user.filter_tags = selected_tags
 
-            await response.delete()
+            await delete_message(response)
             user.state = UserState.search_movie
 
         elif selected_emoji == emoji_filter_year:  # Filter by year
             user.state = UserState.input_search_filter
 
-            await msg.clear_reactions()
+            await clear_reactions(msg)
 
             filter_prompt = 'Wprowadź rok lub zakres lat (np. 2000-2005, 2012, 2024)'
             footer = make_footer(show_back_text=True)
             filter_embed = construct_embedded_message(title="Filtrowanie (Rok produkcji)", description=filter_prompt, footer=footer)
-            await msg.edit(embed=filter_embed)
+            await edit_message(message=msg, embed=filter_embed)
 
             pattern = r'^(\d+(-\d+)?)(,\s*\d+(-\d+)?)*$'
 
@@ -690,11 +680,11 @@ async def search_movie(
             if response is None:  # Timeout
                 timeout_description = "Czas na wprowadzenie tekstu upłynął."
                 filter_embed = construct_embedded_message(title="Filtrowanie (Rok produkcji)", description=timeout_description)
-                await msg.edit(embed=filter_embed)
+                await edit_message(message=msg, embed=filter_embed)
                 return
 
             if response.content == 'w':  # Go back
-                await response.delete()
+                await delete_message(response)
                 user.state = UserState.search_movie
                 continue
 
@@ -702,7 +692,7 @@ async def search_movie(
             selected_years = get_years_from_input(response.content)
             user.filter_years = selected_years
 
-            await response.delete()
+            await delete_message(response)
             user.state = UserState.search_movie
 
 
@@ -718,8 +708,8 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
         title = "Wyszukiwarka filmów (Brak użytkownika)"
         description = "**Użytkownik nie istnieje.**\n\n"
         embed = construct_embedded_message(title=title, description=description)
-        await user_message.delete()
-        await bot_message.edit(embed=embed)
+        await delete_message(user_message)
+        await edit_message(message=bot_message, embed=embed)
         return
 
     title = f"Wyszukiwarka filmów ({user.display_name})"
@@ -730,8 +720,8 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
         embed = construct_embedded_message(title=title, description=description)
         footer = make_footer(show_back_text=True)
         embed.set_footer(text=footer)
-        await user_message.delete()
-        await bot_message.edit(embed=embed)
+        await delete_message(user_message)
+        await edit_message(message=bot_message, embed=embed)
         return
 
     user.selection_input = input_int
@@ -771,8 +761,8 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
     # Set footer, Delete User message, Edit Bot message
     footer_text = make_footer(emoji_mapping=emoji_to_text, show_back_text=True)
     embed.set_footer(text=footer_text)
-    await user_message.delete()
-    msg = await bot_message.edit(embed=embed)
+    await delete_message(user_message)
+    msg = await edit_message(message=bot_message, embed=embed)
 
     # Waiting for user reaction and updating message
     while True:
@@ -796,7 +786,7 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
         # Update message
         footer_text = make_footer(emoji_mapping=emoji_to_text, show_back_text=True)
         embed.set_footer(text=footer_text)
-        await msg.edit(embed=embed)
+        await edit_message(message=msg, embed=embed)
 
 
 async def rate_movie(user_message: discord.Message, bot_message: discord.Message) -> None:
@@ -810,11 +800,11 @@ async def rate_movie(user_message: discord.Message, bot_message: discord.Message
     input_int = int(user_message.content)
     selected_movie = user.movie_selection_list[input_int - 1]
 
-    await bot_message.clear_reactions()
+    await clear_reactions(bot_message)
     rating_prompt = "Wpisz ocenę filmu (1-10):"
     footer = make_footer(show_back_text=True)
     rating_embed = construct_embedded_message(title="Oceń Film", description=rating_prompt, footer=footer)
-    await bot_message.edit(embed=rating_embed)
+    await edit_message(message=bot_message, embed=rating_embed)
 
     # Wait for user to enter a rating
     response = await get_user_text(
@@ -829,11 +819,11 @@ async def rate_movie(user_message: discord.Message, bot_message: discord.Message
     if response is None:
         timeout_description = "Czas na ocenę filmu upłynął."
         rating_embed = construct_embedded_message(title="Oceń Film", description=timeout_description)
-        await bot_message.edit(embed=rating_embed)
+        await edit_message(message=bot_message, embed=rating_embed)
         return
 
     if response.content == 'w':  # Go back
-        await response.delete()
+        await delete_message(response)
         user.state = old_state
         return
 
@@ -845,8 +835,8 @@ async def rate_movie(user_message: discord.Message, bot_message: discord.Message
     confirm_description = f"Film został oceniony na {new_rating}/10."
     footer = make_footer(text="m.list - otwiera listę filmów")
     rating_embed = construct_embedded_message(title="Oceniono Film", description=confirm_description, footer=footer)
-    await response.delete()
-    await bot_message.edit(embed=rating_embed)
+    await delete_message(response)
+    await edit_message(message=bot_message, embed=rating_embed)
 
 
 async def watchlist_panel(
@@ -883,7 +873,7 @@ async def watchlist_panel(
         sort_ascending = user.sort_ascending_watchlist
         sort_key = user.sort_key_watchlist
 
-        await user_message.delete()
+        await delete_message(user_message)
 
     entries = user.watchlist.get_entries(sort_key=sort_key, reverse=not sort_ascending)
     entries_count = len(entries)
@@ -894,10 +884,10 @@ async def watchlist_panel(
         embed = construct_embedded_message(title=title, description=description, colour=0xdfc118)
 
         if msg is None:
-            msg = await channel.send(embed=embed)
+            msg = await send_message(channel=channel, embed=embed)
             user.message_id = msg.id
         else:
-            await msg.edit(embed=embed)
+            await edit_message(message=msg, embed=embed)
         user.movie_selection_list = []
         return
 
@@ -964,11 +954,11 @@ async def watchlist_panel(
         footer = make_footer(emoji_mapping=emoji_to_text)
         embed.set_footer(text=footer)
 
-        if msg is None:  # If it's the first time, send a new message
-            msg = await channel.send(embed=embed)
+        if msg is None:  # Send a new message
+            msg = await send_message(channel=channel, embed=embed)
             user.message_id = msg.id
-        else:  # Otherwise, edit the existing message
-            await msg.edit(embed=embed)
+        else:  # Edit the existing message
+            await edit_message(message=msg, embed=embed)
         user.movie_selection_list = [e.movie for e in entries]
 
         # Get User reaction emoji
@@ -1005,7 +995,7 @@ async def watchlist_panel(
                 embed.set_footer(text=footer)
 
                 # Send updated embed with new sorting
-                await msg.edit(embed=embed)
+                await edit_message(message=msg, embed=embed)
 
                 sort_payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, REACTION_TIMEOUT)
                 if sort_payload is None:
@@ -1039,17 +1029,13 @@ async def watchlist_panel(
             # Create the CSV file in memory
             csv_file = user.watchlist.get_csv(sort_key=sort_key, reverse=not sort_ascending)
             discord_file = File(fp=csv_file, filename=f"{user.display_name}.csv")
-            await msg.clear_reactions()
-            await msg.channel.send(file=discord_file)
+            await clear_reactions(msg)
+            await send_message(channel=msg.channel, file=discord_file)
             time.sleep(5)  # Use sleep to prevent spamming download requests
 
         # Update message after page change
         embed = make_embed(pages[current_page - 1], current_page)
-        try:
-            await msg.edit(embed=embed)
-        except discord.NotFound as e:  # Message not found
-            logging.warning(f"Message not found when attempting to edit: {e}. Message ID might be invalid or deleted.")
-            msg = None  # Mark message as None to send a new one
+        msg = await edit_message(message=msg, embed=embed)
 
 
 async def get_user_reaction(
@@ -1086,16 +1072,9 @@ async def get_user_reaction(
             controller.interaction_task = new_task
 
     # Update reactions
-    try:
-        if message.channel.type != discord.ChannelType.private:
-            await message.clear_reactions()
-        for e in emojis:
-            await message.add_reaction(e)
-    except discord.NotFound as err:
-        logging.warning(f"Failed to clear or add reactions. Message not found: {err}.")
-        return
-    except discord.HTTPException as err:
-        logging.warning(f"Failed to clear or add reactions. HTTPException: {err}")
+    await clear_reactions(message)
+    for e in emojis:
+        await add_reaction(message=message, emoji=e)
 
     # Wait for the reaction
     try:
