@@ -134,7 +134,8 @@ async def search(ctx: Context, *title: Optional[str]) -> None:
 
     if not user:
         # Add new User
-        bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
+        user = User(ctx.author.id, ctx.author.name, ctx.author.display_name)
+        bot.g_users.append(user)
 
     search_query = ' '.join(title) if title else ''
     ctx.message.content = search_query
@@ -156,7 +157,8 @@ async def watchlist(ctx: Context) -> None:
 
     if not user:
         # Add new User
-        bot.g_users.append(User(ctx.author.id, ctx.author.name, ctx.author.display_name))
+        user = User(ctx.author.id, ctx.author.name, ctx.author.display_name)
+        bot.g_users.append(user)
 
     fetched_message = await fetch_message(channel=ctx.channel, message_id=user.message_id)
     if fetched_message:
@@ -319,12 +321,12 @@ async def search_movie(
         user.filter_tags.clear()
         user.filter_years.clear()
     else:  # continue searching
-        if user_input:
-            sort_ascending = user.sort_ascending_search
-            sort_key = user.sort_key_search
-        else:
+        if not user_input and user.sort_key_search == 'match_score':
             sort_ascending = False
             sort_key = 'date_added'
+        else:
+            sort_ascending = user.sort_ascending_search
+            sort_key = user.sort_key_search
         selected_tags = user.filter_tags
         selected_years = user.filter_years
 
@@ -361,10 +363,10 @@ async def search_movie(
                 column_rating = f"{movie.rating}"
 
                 # Limit Row Width
-                if len(column_title) >= 37:
-                    column_title = column_title[:34] + "..."
-                if len(column_year_tags) >= 26:
-                    column_year_tags = column_year_tags[:23].rstrip(",") + "..."
+                if len(column_title) >= 36:
+                    column_title = column_title[:33] + "..."
+                if len(column_year_tags) >= 25:
+                    column_year_tags = column_year_tags[:22].rstrip(",") + "..."
 
                 # Check field length limit
                 if (len(field_title) + len(column_title) + 1 > MAX_FIELD_LENGTH or
