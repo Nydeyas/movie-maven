@@ -169,6 +169,8 @@ class MovieSite:
         if limit_before_sort and max_items is not None:
             movies_sorted_by_score = movies_sorted_by_score[:max_items]
 
+        movie_set = set(movies_sorted_by_score)
+
         # Sort based on the specified sort key
         if sort_key == 'match_score':
             result_movies = movies_sorted_by_score
@@ -185,7 +187,7 @@ class MovieSite:
 
         # Filter out movies that were not in the original sorted by score list
         if sort_key != 'match_score':
-            result_movies = [m for m in result_movies if m in movies_sorted_by_score]
+            result_movies = [m for m in result_movies if m in movie_set]
 
         # Limit the number of items after sorting if limit_before_sort is False
         if not limit_before_sort and max_items is not None:
