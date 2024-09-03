@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from source.classes.movie_site import MovieSite
@@ -13,10 +13,10 @@ class Movie:
         self.description: str = data.get('description', '')
         self.show_type: str = data.get('show_type', '')
         self.tags: str = data.get('tags', '')
-        self.year: int = data.get('year', 0)
-        self.length: int = data.get('length', 0)
-        self.rating: float = data.get('rating', 0.0)
-        self.votes: int = data.get('votes', 0)
+        self.year: Optional[int] = data.get('year')
+        self.length: Optional[int] = data.get('length')
+        self.rating: Optional[float] = data.get('rating')
+        self.votes: Optional[int] = data.get('votes')
         self.countries: str = data.get('countries', '')
         self.link: str = data.get('link', '')
         self.image_link: str = data.get('image_link', '')
@@ -37,3 +37,30 @@ class Movie:
 
     def __hash__(self):
         return hash((self.title, self.year, self.length))
+
+    def is_valid(self) -> bool:
+        """Check if the movie is valid by ensuring that all required fields are filled properly."""
+        return all(
+            value not in (None, '')
+            for value in (
+                self.title, self.description, self.show_type, self.tags, self.countries, self.link, self.image_link
+            )
+        ) and all(
+            value is not None
+            for value in (self.year, self.length, self.rating, self.votes)
+        )
+
+    def to_payload(self) -> MoviePayload:
+        return {
+            'title': self.title,
+            'description': self.description,
+            'show_type': self.show_type,
+            'tags': self.tags,
+            'year': self.year,
+            'length': self.length,
+            'rating': self.rating,
+            'votes': self.votes,
+            'countries': self.countries,
+            'link': self.link,
+            'image_link': self.image_link,
+        }

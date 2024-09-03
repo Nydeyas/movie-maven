@@ -60,6 +60,10 @@ class MovieSite:
             if duplicates or new_movie not in self.movies:
                 self.movies.append(new_movie)
 
+    def filter_invalid_movies(self) -> MovieSite:
+        incorrect_movies = [movie for movie in self.movies if not movie.is_valid()]
+        return MovieSite(name=f"{self.name}_errors", data=[movie.to_payload() for movie in incorrect_movies])
+
     def get_movies_sorted_by_title(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         """Return a list of movies sorted alphabetically by title."""
         locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')

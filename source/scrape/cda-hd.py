@@ -71,7 +71,7 @@ def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List
 
                     year_text = browser.find_element(By.XPATH, "//*[@id='uwee']/div[2]/span").text
                     year_str = find_last_number(year_text)
-                    year = int(year_str) if year_str.isdigit() else None
+                    year = int(year_str) if year_str.isdigit() and 1900 < int(year_str) < 2100 else None
 
                     length_text = browser.find_element(By.XPATH, "//*[contains(@class, 'icon-time')]/..").text
                     length_str = find_first_number(length_text)

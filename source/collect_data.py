@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from math import ceil
 import pandas as pd
@@ -39,14 +40,18 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
         # Run web scraping
         result = await module.scrape_movies(w_name, fr'{link}', max_pages)
 
-        # Add new data
+        # Join old data with new data
         old_size = len(data[i].movies) if data else 0
         data[i].add_movies(result, duplicates=False)
         new_size = len(data[i].movies)
         logging.info(f"{new_size - old_size} new movies added to data.")
 
-        save_csv(data[i], fr'data/sites/csv/{w_name}.csv')
-        save_pkl(data[i], fr'data/sites/pkl/{w_name}.pkl')
+        # Find invalid movies
+        invalid_data = data[i].filter_invalid_movies()
+
+        save_csv(data[i], fr'data/sites/{w_name}/{w_name}.csv')
+        save_pkl(data[i], fr'data/sites/{w_name}/{w_name}.pkl')
+        save_csv(invalid_data, fr'data/sites/{w_name}/{w_name}-errors.csv')
 
         counter += 1
         et = datetime.now()
@@ -60,7 +65,7 @@ def load_scraped_data(sites: List[str]) -> List[MovieSite]:
     """Loads data to bot"""
     data = []
     for w_name in sites:
-        w = load_pkl(fr'data/sites/pkl/{w_name}.pkl')
+        w = load_pkl(fr'data/sites/{w_name}/{w_name}.pkl')
         if w is None:
             w = MovieSite(name=w_name, data=[])
             logging.warning(f"Creating new MovieSite object for {w_name}")
@@ -72,6 +77,8 @@ def load_scraped_data(sites: List[str]) -> List[MovieSite]:
 def save_pkl(obj: Any, filename: str) -> None:
     """Saves Python object as a pickle file."""
     try:
+        # Make a directory if it doesn't exist
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, 'wb') as out:  # Overwrites any existing file.
             pickle.dump(obj, out, pickle.HIGHEST_PROTOCOL)
         logging.info(f"Object successfully saved to {filename}")
@@ -103,6 +110,8 @@ def save_csv(data: MovieSite, filename: str) -> None:
     movies = data.movies
 
     try:
+        # Make a directory if it doesn't exist
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         if movies:
             obj_df = pd.DataFrame(
                 [
