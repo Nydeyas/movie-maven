@@ -109,10 +109,10 @@ class MovieSite:
 
     def search_movies(
             self,
-            phrase: str,
+            phrase: Optional[str] = None,
             max_items: Optional[int] = None,
             min_match_score: float = 0.0,
-            sort_key: str = 'match_score',
+            sort_key: Optional[str] = 'match_score',
             reverse: bool = False,
             limit_before_sort: bool = False,
             filter_tags: Optional[List[str]] = None,
@@ -141,7 +141,7 @@ class MovieSite:
         Returns:
         - List[Movie]: A list of movies sorted by match score in descending order.
         """
-        phrase_lower = phrase.lower()
+        phrase_lower = phrase.lower() if phrase else ''
         movie_matches: Dict[Movie, float] = {}
 
         for movie in self.movies:
@@ -172,7 +172,7 @@ class MovieSite:
         movie_set = set(movies_sorted_by_score)
 
         # Sort based on the specified sort key
-        if sort_key == 'match_score':
+        if sort_key in (None, 'match_score'):
             result_movies = movies_sorted_by_score
         elif sort_key == 'title':
             result_movies = self.get_movies_sorted_by_title(max_items=None, reverse=reverse)

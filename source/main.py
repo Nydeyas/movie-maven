@@ -1,6 +1,9 @@
 import asyncio
-import time
+import logging
+import os
 import re
+import random
+import time
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from typing import Optional, Callable, List, Dict
@@ -9,11 +12,9 @@ import discord
 from discord import File
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
-import os
-import collect_data
 from dotenv import load_dotenv
-import logging
 
+import collect_data
 from source.classes.enums import UserState, MovieTag, MovieTagColor
 from source.classes.movie import Movie
 from source.classes.user import User
@@ -74,7 +75,7 @@ MAX_ROWS_SEARCH = 20  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
 MIN_MATCH_SCORE = 40  # Minimum score of similarity in the search(0-100)
-INTERACTION_TIMEOUT = 900.0  # Time in seconds for bot to track interactions
+INTERACTION_TIMEOUT = 1200.0  # Time in seconds for bot to track interactions
 
 # Global Bot values
 bot.g_locked = False
@@ -297,6 +298,8 @@ async def search_movie(
     emoji_sort_by_date_added = '🔥'
     emoji_sort_descending = '📉'
     emoji_sort_ascending = '📈'
+    emoji_random = '🎲'
+    emoji_back = '↩'
 
     ctx = await bot.get_context(user_message)
     channel = user_message.channel
@@ -332,7 +335,12 @@ async def search_movie(
 
         await delete_message(user_message)
 
-    def make_embed(movies: List[Movie]) -> discord.Embed:
+    def make_search_results_embed(
+            movies: List[Movie],
+            description: Optional[str] = None,
+            show_filter_info: bool = False,
+            show_sort_info: bool = False
+    ) -> discord.Embed:
         """Create the embed message with the current search results."""
         title = f"Wyszukiwarka filmów ({user.display_name})"
         field_title, field_year_tags, field_rating = '', '', ''
@@ -381,62 +389,67 @@ async def search_movie(
 
         if not movies:
             if not user_input and not selected_tags and not selected_years:
-                description = "Brak filmów w bazie."
+                desc = "Brak filmów w bazie."
             else:
-                description = f"**Wyniki: {user_input}**\n\nNie znaleziono pasujących wyników.\n"
-            e = construct_embedded_message(title=title, description=description)
+                desc = f"**Wyniki: {user_input}**\n\nNie znaleziono pasujących wyników.\n"
+            e = construct_embedded_message(title=title, description=desc)
         else:
-            # Filter description
+            # Filter info
             filtering_info = ''
-            if selected_tags:
-                tags = ", ".join(selected_tags)
-                if len(tags) >= 100:
-                    tags = tags[:97] + '...'
-                filtering_info += f'• **Gatunek**: {tags}\n'
+            if show_filter_info:
+                if selected_tags:
+                    tags = ", ".join(selected_tags)
+                    if len(tags) >= 100:
+                        tags = tags[:97] + '...'
+                    filtering_info += f'• **Gatunek**: {tags}\n'
 
-            if selected_years:
-                years = list_to_range_string(selected_years)
-                if len(years) >= 100:
-                    years = years[:97] + '...'
-                filtering_info += f'• **Rok produkcji**: {years}\n'
+                if selected_years:
+                    years = list_to_range_string(selected_years)
+                    if len(years) >= 100:
+                        years = years[:97] + '...'
+                    filtering_info += f'• **Rok produkcji**: {years}\n'
 
-            if filtering_info:
-                filtering_info = '**Filtrowanie:**\n' + filtering_info
+                if filtering_info:
+                    filtering_info = '**Filtrowanie:**\n' + filtering_info
 
-            # Sort description
-            sort_desc = {
-                'title': 'Tytuł',
-                'rating': 'Ocena',
-                'year': 'Rok produkcji'
-            }
-            if sort_key == 'date_added':
-                if sort_ascending:
-                    sorting_info = '**Sortowanie:\n• Najdawniej dodane**\n'
-                else:
-                    if user_input:
-                        sorting_info = '**Sortowanie:\n• Ostatnio dodane**\n'
+            # Sort info
+            sorting_info = ''
+            if show_sort_info:
+                sort_desc = {
+                    'title': 'Tytuł',
+                    'rating': 'Ocena',
+                    'year': 'Rok produkcji'
+                }
+                if sort_key == 'date_added':
+                    if sort_ascending:
+                        sorting_info = '**Sortowanie:\n• Najdawniej dodane**\n'
                     else:
-                        sorting_info = '**Ostatnio dodane:**\n'  # Default sort text for empty m.search command
-            elif sort_key != 'match_score':
-                key = sort_key.split('_')[0]  # Extract part before '_'
-                sort_label = sort_desc.get(key, '')
-                order_label = 'rosnąco' if sort_ascending else 'malejąco'
-                sorting_info = f'**Sortowanie:\n• {sort_label}**: {order_label}\n'
-            else:
-                sorting_info = ''
+                        if user_input:
+                            sorting_info = '**Sortowanie:\n• Ostatnio dodane**\n'
+                        else:
+                            sorting_info = '**Ostatnio dodane:**\n'  # Default sort text for empty m.search command
+                elif sort_key != 'match_score':
+                    key = sort_key.split('_')[0]  # Extract part before '_'
+                    sort_label = sort_desc.get(key, '')
+                    order_label = 'rosnąco' if sort_ascending else 'malejąco'
+                    sorting_info = f'**Sortowanie:\n• {sort_label}**: {order_label}\n'
 
             # Create description based on user_input
-            if user_input:
-                description = f"{filtering_info}{sorting_info}\n**Wyniki: {user_input}**\n\n"
+            if description:
+                desc = (
+                    f"{description}\n\n{filtering_info}{sorting_info}\n\n"
+                )
+            elif user_input:
+                desc = f"{filtering_info}{sorting_info}\n**Wyniki: {user_input}**\n\n"
             else:
-                description = (
+                desc = (
                     "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
                     f"Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n{filtering_info}{sorting_info}\n\n"
                 )
 
             # Construct the embed message
             e = construct_embedded_message(field_title, field_year_tags, field_rating, title=title,
-                                           description=description)
+                                           description=desc)
         return e
 
     def get_tags_from_input(input_str: str) -> List[str]:
@@ -544,11 +557,12 @@ async def search_movie(
 
         user.movie_selection_list = result_movies
 
-        embed = make_embed(result_movies)
+        embed = make_search_results_embed(result_movies, show_sort_info=True, show_filter_info=True)
         emoji_to_text = {
             emoji_filter_tag: "Filtruj (Gatunek)",
             emoji_filter_year: "Filtruj (Rok produkcji)",
             emoji_sort: "Sortuj",
+            emoji_random: "Losuj film"
         }
         footer = make_footer(emoji_mapping=emoji_to_text)
         embed.set_footer(text=footer)
@@ -597,7 +611,7 @@ async def search_movie(
                 emoji_to_text[emoji_sort_exit] = "Akceptuj"
 
                 # Update embed with sorting options
-                embed = make_embed(result_movies)
+                embed = make_search_results_embed(result_movies, show_sort_info=True, show_filter_info=True)
                 embed.set_footer(text=make_footer(emoji_mapping=emoji_to_text))
                 msg = await edit_message(message=msg, embed=embed)
 
@@ -721,6 +735,50 @@ async def search_movie(
 
             await delete_message(response)
             user.state = UserState.search_movie
+        elif selected_emoji == emoji_random:  # Show random movie
+            while True:  # Pick random movie
+                filtered_movies = []
+                for site in bot.g_sites:
+                    site_movies = site.search_movies(
+                        filter_tags=selected_tags,
+                        filter_years=selected_years
+                    )
+                    filtered_movies.extend(site_movies)
+
+                if filtered_movies:
+                    prompt_random = (
+                        "**🎲 Losowanie filmu**\n\n"
+                        "Podczas losowania uwzględniane są:\n"
+                        "- Filtry: Wybrane gatunki i lata produkcji\n"
+                        "Podczas losowania pomijane są:\n"
+                        "- Fraza: Tekst wpisany przez użytkownika"
+                    )
+                    random_movie = random.choice(filtered_movies)
+                    embed = make_search_results_embed([random_movie], description=prompt_random, show_filter_info=True)
+                    user.movie_selection_list = [random_movie]
+                else:
+                    embed = make_search_results_embed([])
+                    user.movie_selection_list = []
+
+                # Make embed
+                emoji_to_text = {emoji_random: "Losuj film", emoji_back: "Powrót"}
+
+                footer = make_footer(emoji_mapping=emoji_to_text)
+                embed.set_footer(text=footer)
+                await edit_message(message=msg, embed=embed)
+
+                payload = await get_user_reaction(msg, list(emoji_to_text.keys()), user, INTERACTION_TIMEOUT)
+                if payload is None:
+                    return
+
+                selected_emoji = str(payload.emoji)
+
+                if selected_emoji == emoji_back:  # Go back to the full list
+                    break
+                elif selected_emoji in [emoji_random]:  # Pick random again
+                    continue
+            continue
+
 
 
 async def movie_details(user_message: discord.Message, bot_message: discord.Message) -> None:
@@ -754,11 +812,12 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
 
     user.selection_input = input_int
     selected_movie = user.movie_selection_list[input_int - 1]
+    rating = f"{selected_movie.rating}/10" if selected_movie.rating else "N/A"
 
     description = (
         f"**{selected_movie.year}r\u2004|\u2004{selected_movie.length}min\u2004|\u2004{selected_movie.tags}**\n\n"
         f"{selected_movie.description}\n\n"
-        f"Ocena: {selected_movie.rating}/10\n"
+        f"Ocena: {rating}\n"
         f"{selected_movie.votes} głosów\n\n"
         f"Format: {selected_movie.show_type}\n"
         f"Kraje: {selected_movie.countries}\n\n"
@@ -912,7 +971,7 @@ async def watchlist_panel(
         user.movie_selection_list = []
         return
 
-    def make_embed(page_entries: List[MovieEntry], page_number: int, show_sorting_info: bool = False) -> discord.Embed:
+    def make_watchlist_embed(page_entries: List[MovieEntry], page_number: int, show_sorting_info: bool = False) -> discord.Embed:
         # Generate the sorting description if requested
         if show_sorting_info:
             sort_criteria = {
@@ -971,7 +1030,7 @@ async def watchlist_panel(
         emoji_to_text[emoji_download] = "Pobierz listę"
 
         # Make embed and footer
-        embed = make_embed(pages[current_page - 1], current_page)
+        embed = make_watchlist_embed(pages[current_page - 1], current_page)
         footer = make_footer(emoji_mapping=emoji_to_text)
         embed.set_footer(text=footer)
 
@@ -1011,7 +1070,7 @@ async def watchlist_panel(
                 emoji_to_text[emoji_sort_exit] = "Akceptuj"
 
                 # Make embed and footer
-                embed = make_embed(pages[current_page - 1], current_page, show_sorting_info=True)
+                embed = make_watchlist_embed(pages[current_page - 1], current_page, show_sorting_info=True)
                 footer = make_footer(emoji_mapping=emoji_to_text)
                 embed.set_footer(text=footer)
 
@@ -1055,7 +1114,7 @@ async def watchlist_panel(
             time.sleep(5)  # Use sleep to prevent spamming download requests
 
         # Update message after page change
-        embed = make_embed(pages[current_page - 1], current_page)
+        embed = make_watchlist_embed(pages[current_page - 1], current_page)
         msg = await edit_message(message=msg, embed=embed)
 
 
