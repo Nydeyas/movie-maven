@@ -148,7 +148,7 @@ async def search(ctx: Context, *title: Optional[str]) -> None:
     await search_movie(ctx.message, is_command=True)
 
 
-@bot.command(aliases=['list', 'lista', 'w', 'wl', 'l'], brief='Lista filmów użytkownika',
+@bot.command(aliases=['list', 'lista', 'w', 'wl', 'l'], brief='Pokaż swoją listę filmów',
              description='Wyświetla listę filmów użytkownika wraz z ocenami')
 async def watchlist(ctx: Context) -> None:
     if ctx.channel.id not in TEXT_CHANNELS or bot.g_locked:
@@ -287,8 +287,8 @@ async def search_movie(
 ) -> None:
     """Search result panel shown (List of movies)"""
     # Emojis
-    emoji_filter_tag = '🎭'
-    emoji_filter_year = '🎦'
+    emoji_filter_tag = '🎬'
+    emoji_filter_year = '🕰️'
     emoji_sort = '🔀'
     emoji_sort_reset = '🔄'
     emoji_sort_exit = '🆗'
@@ -444,7 +444,7 @@ async def search_movie(
             else:
                 desc = (
                     "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
-                    f"Możesz także zastosować odpowiednie filtry za pomocą reakcji.\n\n{filtering_info}{sorting_info}\n\n"
+                    f"Możesz także skorzystać z dostępnych filtrów i funkcji za pomocą reakcji.\n\n{filtering_info}{sorting_info}\n\n"
                 )
 
             # Construct the embed message
