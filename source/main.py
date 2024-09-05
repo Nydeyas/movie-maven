@@ -672,7 +672,7 @@ async def search_movie(
 
             # Edit message
             filter_prompt = (
-                f"Wprowadź gatunki z listy lub ich numery (np. '1,2,8', lub 'horror, dramat'):\n\n{tag_list}"
+                f"Wprowadź gatunki z listy lub ich numery (np. '5, 9', lub 'horror, dramat'):\n\n{tag_list}"
             )
             footer = make_footer(show_back_text=True)
             filter_embed = construct_embedded_message(title="Filtrowanie (Gatunek)", description=filter_prompt,
@@ -887,7 +887,7 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
                 INTERACTION_TIMEOUT,
                 check=(
                     lambda m: m.author == user_message.author
-                    and ((m.content.replace(".", "", 1).isdigit() and 1 <= float(m.content) <= 10) or (m.content == 'w'))
+                    and (m.content.replace(",", ".").replace(".", "", 1).isdigit() and 1 <= float(m.content.replace(",", ".")) <= 10 or m.content == 'w')
                     and m.channel.id == msg.channel.id
                 )
             )
@@ -900,7 +900,9 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
                 return
 
             # Update rating
-            new_rating = int(response.content) if response.content.isdigit() else round(float(response.content), 1)
+            rating = response.content.replace(",", ".")
+            new_rating = (int(rating) if rating.isdigit() else round(float(rating), 1))
+
             user.watchlist.update_rating(selected_movie, new_rating)
 
             # Confirm rating update

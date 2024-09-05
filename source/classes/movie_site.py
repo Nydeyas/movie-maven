@@ -172,7 +172,7 @@ class MovieSite:
         movie_set = set(movies_sorted_by_score)
 
         # Sort based on the specified sort key
-        if sort_key in (None, 'match_score'):
+        if not sort_key or sort_key == 'match_score':
             result_movies = movies_sorted_by_score
         elif sort_key == 'title':
             result_movies = self.get_movies_sorted_by_title(max_items=None, reverse=reverse)
