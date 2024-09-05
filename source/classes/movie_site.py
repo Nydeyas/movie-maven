@@ -149,7 +149,7 @@ class MovieSite:
             smp = simple_match_percentage(phrase_lower, title_lower)
             ldp = levenshtein_distance_percentage(phrase_lower, title_lower)
             lcsp = longest_common_substring_percentage(phrase_lower, title_lower)
-            match_score = 25 * smp + 5 * ldp + 70 * lcsp
+            match_score = 15 * smp + 50 * ldp + 35 * lcsp
             if match_score >= min_match_score:
                 movie_matches[movie] = match_score
 

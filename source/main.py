@@ -74,7 +74,7 @@ USERS_PATH = "data/users"
 MAX_ROWS_SEARCH = 20  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
-MIN_MATCH_SCORE = 40  # Minimum score of similarity in the search(0-100)
+MIN_MATCH_SCORE = 35  # Minimum score of similarity in the search(0-100)
 INTERACTION_TIMEOUT = 1200.0  # Time in seconds for bot to track interactions
 
 # Global Bot values
