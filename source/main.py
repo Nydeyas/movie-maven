@@ -69,7 +69,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
                                help_command=help_command)
 
 # Constants
-TEXT_CHANNELS = [1267279190206451752, 1267248186410406023, 1279930397018427434]  # Discord channels IDs
+TEXT_CHANNELS = {1267279190206451752, 1267248186410406023, 1279930397018427434}  # Discord channels IDs
 USERS_PATH = "data/users"
 MAX_ROWS_SEARCH = 20  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
@@ -443,8 +443,10 @@ async def search_movie(
                 desc = f"{filtering_info}{sorting_info}\n**Wyniki: {user_input}**\n\n"
             else:
                 desc = (
-                    "**Info:**\nWpisz na czacie tytuł filmu do wyszukania lub numer z poniższej listy.\n"
-                    f"Możesz także skorzystać z dostępnych filtrów i funkcji za pomocą reakcji.\n\n{filtering_info}{sorting_info}\n\n"
+                    "**📝 Info:**\n"
+                    "Wpisz na czacie **tytuł filmu**, który chcesz wyszukać, lub wybierz **numer** z poniższej listy.\n"
+                    "Możesz również **skorzystać z filtrów i funkcji** dostępnych za pomocą reakcji.\n\n"
+                    f"{filtering_info}{sorting_info}\n\n"
                 )
 
             # Construct the embed message
@@ -672,7 +674,7 @@ async def search_movie(
 
             # Edit message
             filter_prompt = (
-                f"Wprowadź gatunki z listy lub ich numery (np. '5, 9', lub 'horror, dramat'):\n\n{tag_list}"
+                f"Wprowadź gatunki z listy lub ich numery (np. '5, 9', lub 'dramat, horror'):\n\n{tag_list}"
             )
             footer = make_footer(show_back_text=True)
             filter_embed = construct_embedded_message(title="Filtrowanie (Gatunek)", description=filter_prompt,
@@ -812,10 +814,19 @@ async def movie_details(user_message: discord.Message, bot_message: discord.Mess
 
     user.selection_input = input_int
     selected_movie = user.movie_selection_list[input_int - 1]
+
     rating = f"{selected_movie.rating}/10" if selected_movie.rating else "N/A"
+    basic_info_parts = []
+    if selected_movie.year:
+        basic_info_parts.append(f"{selected_movie.year}r")
+    if selected_movie.length:
+        basic_info_parts.append(f"{selected_movie.length}min")
+    if selected_movie.tags:
+        basic_info_parts.append(selected_movie.tags)
+    formatted_movie_basic_info = "\u2004|\u2004".join(basic_info_parts)
 
     description = (
-        f"**{selected_movie.year}r\u2004|\u2004{selected_movie.length}min\u2004|\u2004{selected_movie.tags}**\n\n"
+        f"**{formatted_movie_basic_info}**\n\n"
         f"{selected_movie.description}\n\n"
         f"Ocena: {rating}\n"
         f"{selected_movie.votes} głosów\n\n"
@@ -1110,7 +1121,8 @@ async def watchlist_panel(
         elif selected_emoji == emoji_download:  # Download list
             # Create the CSV file in memory
             csv_file = user.watchlist.get_csv(sort_key=sort_key, reverse=not sort_ascending)
-            discord_file = File(fp=csv_file, filename=f"{user.display_name}.csv")
+            date_string = datetime.now().strftime("%Y-%m-%d")
+            discord_file = File(fp=csv_file, filename=f"{user.display_name} {date_string}.csv")
             await clear_reactions(msg)
             await send_message(channel=msg.channel, file=discord_file)
             time.sleep(5)  # Use sleep to prevent spamming download requests
