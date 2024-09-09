@@ -1,4 +1,4 @@
-from typing import TypedDict, List
+from typing import TypedDict
 
 
 class Movie(TypedDict):

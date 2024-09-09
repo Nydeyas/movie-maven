@@ -1,15 +1,16 @@
-from selenium.common import NoSuchElementException
-
-from source.to_thread import to_thread
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import logging
+import re
 from datetime import datetime
 from typing import List, Any
-import re
-from source.classes.types_base import Movie as MoviePayload
-import logging
+
+from selenium.common import NoSuchElementException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import Driver
+
+from classes.types_base import Movie as MoviePayload
+from to_thread import to_thread
 
 
 def find_first_number(text: str, find_decimal: bool = False, remove_separator: bool = True) -> str:

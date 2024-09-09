@@ -4,10 +4,10 @@ from difflib import SequenceMatcher
 from Levenshtein import distance
 import locale
 
-from source.classes.movie import Movie
+from classes.movie import Movie
 
 if TYPE_CHECKING:
-    from source.classes.types_base import Movie as MoviePayload
+    from classes.types_base import Movie as MoviePayload
 
 
 def replace_none(value, default=0):

@@ -7,10 +7,10 @@ from typing import List, TYPE_CHECKING, Optional
 import logging
 import locale
 
-from source.classes.movie import Movie
+from classes.movie import Movie
 
 if TYPE_CHECKING:
-    from source.classes.user import User
+    from classes.user import User
 
 
 def replace_none(value, default=0):

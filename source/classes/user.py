@@ -5,9 +5,9 @@ from typing import List, Union, Optional
 
 import discord
 
-from source.classes.enums import UserState
-from source.classes.movie import Movie
-from source.classes.watchlist import Watchlist
+from classes.enums import UserState
+from classes.movie import Movie
+from classes.watchlist import Watchlist
 
 
 class User:

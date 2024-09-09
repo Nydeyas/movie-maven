@@ -15,17 +15,17 @@ from discord.ext.commands import Context
 from dotenv import load_dotenv
 
 import collect_data
-from source.classes.enums import UserState, MovieTag, MovieTagColor
-from source.classes.movie import Movie
-from source.classes.user import User
-from source.classes.watchlist import MovieEntry
-from source.discord_utils import clear_reactions, edit_message, fetch_message, delete_message, add_reaction, \
+from classes.enums import UserState, MovieTag, MovieTagColor
+from classes.movie import Movie
+from classes.user import User
+from classes.watchlist import MovieEntry
+from discord_utils import clear_reactions, edit_message, fetch_message, delete_message, add_reaction, \
     send_message
 
 # Logging
 # Set up the log file handler to rotate daily
 log_file_handler = TimedRotatingFileHandler(
-    filename='logs/logfile.log',  # Active log file
+    filename='source/logs/logfile.log',  # Active log file
     when='midnight',  # When to rotate
     interval=1,  # Interval for rotation
     backupCount=10000,  # Number of backup files to keep
@@ -70,7 +70,7 @@ bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, c
 
 # Constants
 TEXT_CHANNELS = {1267279190206451752, 1267248186410406023, 1279930397018427434}  # Discord channels IDs
-USERS_PATH = "data/users"
+USERS_PATH = "source/data/users"
 MAX_ROWS_SEARCH = 20  # Max number of rows showed in movie search
 MAX_ROWS_WATCHLIST = 20  # Max number of rows showed in watchlist
 MAX_FIELD_LENGTH = 1024  # Max length of the embed fields (up to 1024 characters limited by Discord)
@@ -344,7 +344,7 @@ async def search_movie(
         """Create the embed message with the current search results."""
         title = f"Wyszukiwarka filmów ({user.display_name})"
         field_title, field_year_tags, field_rating = '', '', ''
-        i = 1
+        x = 1
 
         for s in bot.g_sites:
             site_name = f"**{str(s).upper()}:**\n"
@@ -366,7 +366,7 @@ async def search_movie(
                     continue
 
                 watched_mark = '✔' if user.watchlist.has_movie(movie) else ''
-                column_title = f"{watched_mark} {i}\. {movie.title.split('/')[0]}"
+                column_title = f"{watched_mark} {x}\u200B. {movie.title.split('/')[0]}"
                 column_year_tags = f"{movie.year}\u2003{movie.tags}"
                 column_rating = f"{movie.rating}"
 
@@ -385,7 +385,7 @@ async def search_movie(
                 field_title += column_title + "\n"
                 field_year_tags += column_year_tags + "\n"
                 field_rating += column_rating + "\n"
-                i += 1
+                x += 1
 
         if not movies:
             if not user_input and not selected_tags and not selected_years:
@@ -1006,7 +1006,7 @@ async def watchlist_panel(
             e_rating = '\u200B' if entry.rating is None else entry.rating
             e_number = i + 1 + (page_number - 1) * MAX_ROWS_WATCHLIST
 
-            column_title = f"{e_number}\. {e_title}"
+            column_title = f"{e_number}\u200B. {e_title}"
             column_date = f"{e_date}"
             column_rating = f"{e_rating}"
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from source.classes.movie_site import MovieSite
-    from source.classes.types_base import Movie as MoviePayload
+    from classes.movie_site import MovieSite
+    from classes.types_base import Movie as MoviePayload
 
 
 class Movie:

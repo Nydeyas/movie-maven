@@ -1,14 +1,16 @@
+import importlib
+import logging
 import os
+import pickle
 from datetime import datetime
 from math import ceil
-import pandas as pd
-import importlib
-import pickle
-import logging
-
 from typing import Dict, List, Any
-from source.classes.movie_site import MovieSite
 
+import pandas as pd
+
+from classes.movie_site import MovieSite
+
+SITES_DATA_PATH = "source/data/sites"
 SCRAPE_URLS = {
     "cda-hd": "https://cda-hd.cc/filmy-online"
 }
@@ -49,9 +51,9 @@ async def scrape_new_data(urls: Dict[str, str], max_pages: int | None, data: Lis
         # Find invalid movies
         invalid_data = data[i].filter_invalid_movies()
 
-        save_csv(data[i], fr'data/sites/{w_name}/{w_name}.csv')
-        save_pkl(data[i], fr'data/sites/{w_name}/{w_name}.pkl')
-        save_csv(invalid_data, fr'data/sites/{w_name}/{w_name}-errors.csv')
+        save_csv(data[i], fr'{SITES_DATA_PATH}/{w_name}/{w_name}.csv')
+        save_pkl(data[i], fr'{SITES_DATA_PATH}/{w_name}/{w_name}.pkl')
+        save_csv(invalid_data, fr'{SITES_DATA_PATH}/{w_name}/{w_name}-errors.csv')
 
         counter += 1
         et = datetime.now()
@@ -65,7 +67,7 @@ def load_scraped_data(sites: List[str]) -> List[MovieSite]:
     """Loads data to bot"""
     data = []
     for w_name in sites:
-        w = load_pkl(fr'data/sites/{w_name}/{w_name}.pkl')
+        w = load_pkl(fr'{SITES_DATA_PATH}/{w_name}/{w_name}.pkl')
         if w is None:
             w = MovieSite(name=w_name, data=[])
             logging.warning(f"Creating new MovieSite object for {w_name}")
