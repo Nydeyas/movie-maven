@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from datetime import date
 from typing import List, TYPE_CHECKING, Optional
-import logging
-import locale
+
+import pyuca
 
 from classes.movie import Movie
 
@@ -16,15 +17,31 @@ if TYPE_CHECKING:
 def replace_none(value, default=0):
     return default if value is None else value
 
+collator = pyuca.Collator()
 
 class Watchlist:
     def __init__(self, user: User) -> None:
         self.user: User = user
         self.entries: List[MovieEntry] = []
+        self._sort_title_cache = {}
 
     def __repr__(self) -> str:
         cls_name = type(self).__name__
         return f"{cls_name}(entries={len(self.entries)} movies)"
+
+    def _get_sort_key(self, title: str):
+        preprocessed_title = self._preprocess_title(title)
+        if preprocessed_title not in self._sort_title_cache:
+            self._sort_title_cache[preprocessed_title] = collator.sort_key(preprocessed_title)
+        return self._sort_title_cache[preprocessed_title]
+
+    def _preprocess_title(self, title: str) -> str:
+        # Custom mapping for characters to adjust their sort order
+        custom_mapping = {
+            'ł': 'l🧑', 'ą': 'a🧑', 'ć': 'c🧑', 'ę': 'e🧑', 'ó': 'o🧑', 'ś': 's🧑', 'ź': 'z🧑', 'ż': 'z🧑',
+            'Ł': 'L🧑', 'Ą': 'A🧑', 'Ć': 'C🧑', 'Ę': 'E🧑', 'Ó': 'O🧑', 'Ś': 'S🧑', 'Ź': 'Z🧑', 'Ż': 'Z🧑',
+        }
+        return ''.join(custom_mapping.get(char, char) for char in title)
 
     def add_movie(self, movie: Movie, rating: Optional[float] = None):
         if self.has_movie(movie):
@@ -48,31 +65,28 @@ class Watchlist:
                 break
 
     def get_entries_sorted_by_title(self, max_items: Optional[int] = None, reverse: bool = False) -> List[MovieEntry]:
-        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
-        sorted_entries = sorted(self.entries, key=lambda e: locale.strxfrm(e.movie.title), reverse=reverse)
+        sorted_entries = sorted(self.entries, key=lambda e: self._get_sort_key(e.movie.title), reverse=reverse)
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 
     def get_entries_sorted_by_date(self, max_items: Optional[int] = None, reverse: bool = False) -> List[MovieEntry]:
-        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
         sorted_entries = sorted(
             self.entries,
             key=lambda e: (
-                (e.date_added, locale.strxfrm(e.movie.title))
+                (e.date_added, self._get_sort_key(e.movie.title))
                 if not reverse
-                else (-e.date_added.toordinal(), locale.strxfrm(e.movie.title))
+                else (-e.date_added.toordinal(), self._get_sort_key(e.movie.title))
             ),
             reverse=False  # Sort by the primary key as adjusted
         )
         return sorted_entries[:max_items] if max_items is not None else sorted_entries
 
     def get_entries_sorted_by_rating(self, max_items: Optional[int] = None, reverse: bool = False) -> List[MovieEntry]:
-        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
         sorted_entries = sorted(
             self.entries,
             key=(
-                lambda e: (replace_none(e.rating), locale.strxfrm(e.movie.title))
+                lambda e: (replace_none(e.rating), self._get_sort_key(e.movie.title))
                 if not reverse
-                else (-replace_none(e.rating), locale.strxfrm(e.movie.title))
+                else (-replace_none(e.rating), self._get_sort_key(e.movie.title))
             ),
             reverse=False  # Always sort by the primary key as adjusted
         )

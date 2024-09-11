@@ -1,8 +1,11 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, List, Optional, Dict
+
+import time
 from difflib import SequenceMatcher
+from typing import TYPE_CHECKING, List, Optional, Dict
+
+import pyuca
 from Levenshtein import distance
-import locale
 
 from classes.movie import Movie
 
@@ -44,14 +47,30 @@ def simple_match_percentage(s1: str, s2: str) -> float:
     match_count = sum(1 for x in s1_split if x in s2)
     return match_count / len(s1_split)
 
+collator = pyuca.Collator()
 
 class MovieSite:
     def __init__(self, name: str, data: List[MoviePayload]) -> None:
         self.name: str = name
         self.movies: List[Movie] = [Movie(site=self, data=d) for d in data]
+        self._sort_title_cache = {}
 
     def __str__(self) -> str:
         return self.name
+
+    def _get_sort_key(self, title: str):
+        preprocessed_title = self._preprocess_title(title)
+        if preprocessed_title not in self._sort_title_cache:
+            self._sort_title_cache[preprocessed_title] = collator.sort_key(preprocessed_title)
+        return self._sort_title_cache[preprocessed_title]
+
+    def _preprocess_title(self, title: str) -> str:
+        # Custom mapping for characters to adjust their sort order without using locale or pyicu
+        custom_mapping = {
+            'ł': 'l🧑', 'ą': 'a🧑', 'ć': 'c🧑', 'ę': 'e🧑', 'ó': 'o🧑', 'ś': 's🧑', 'ź': 'z🧑', 'ż': 'z🧑',
+            'Ł': 'L🧑', 'Ą': 'A🧑', 'Ć': 'C🧑', 'Ę': 'E🧑', 'Ó': 'O🧑', 'Ś': 'S🧑', 'Ź': 'Z🧑', 'Ż': 'Z🧑',
+        }
+        return ''.join(custom_mapping.get(char, char) for char in title)
 
     def add_movies(self, new_movies: List[MoviePayload], duplicates: bool = True):
         """Add new movies to the list."""
@@ -65,31 +84,31 @@ class MovieSite:
         return MovieSite(name=f"{self.name}_errors", data=[movie.to_payload() for movie in incorrect_movies])
 
     def get_movies_sorted_by_title(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
-        """Return a list of movies sorted alphabetically by title."""
-        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
-        sorted_movies = sorted(self.movies, key=lambda m: locale.strxfrm(m.title), reverse=reverse)
+        """Return a list of movies sorted alphabetically by title using Unicode Collation Algorithm (pyuca)."""
+        a = time.process_time()
+        sorted_movies = sorted(self.movies, key=lambda m: self._get_sort_key(m.title), reverse=reverse)
+        b = time.process_time()
+        print(b-a)
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
 
     def get_movies_sorted_by_rating(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         """Return a list of movies sorted by rating."""
-        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
         sorted_movies = sorted(
             self.movies,
-            key=lambda m: (replace_none(m.rating), locale.strxfrm(m.title))
+            key=lambda m: (replace_none(m.rating), self._get_sort_key(m.title))
             if not reverse
-            else (-replace_none(m.rating), locale.strxfrm(m.title)),
+            else (-replace_none(m.rating), self._get_sort_key(m.title)),
             reverse=False  # Sort by the primary key as adjusted
         )
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
 
     def get_movies_sorted_by_year(self, max_items: Optional[int] = None, reverse: bool = False) -> List[Movie]:
         """Return a list of movies sorted by year."""
-        locale.setlocale(locale.LC_COLLATE, 'pl_PL.UTF-8')
         sorted_movies = sorted(
             self.movies,
-            key=lambda m: (replace_none(m.year, 1900), locale.strxfrm(m.title))
+            key=lambda m: (replace_none(m.year, 1900), self._get_sort_key(m.title))
             if not reverse
-            else (-replace_none(m.year, 1900), locale.strxfrm(m.title)),
+            else (-replace_none(m.year, 1900), self._get_sort_key(m.title)),
             reverse=False  # Sort by the primary key as adjusted
         )
         return sorted_movies[:max_items] if max_items is not None else sorted_movies
