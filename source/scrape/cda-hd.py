@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from datetime import datetime
 from typing import List, Any
@@ -11,6 +12,8 @@ from seleniumbase import Driver
 
 from classes.types_base import Movie as MoviePayload
 from to_thread import to_thread
+
+CHROMIUM_BINARY_PATH = os.getenv('CHROMIUM_BINARY_PATH')
 
 
 def find_first_number(text: str, find_decimal: bool = False, remove_separator: bool = True) -> str:
@@ -53,7 +56,7 @@ def extract_minutes(text: str, default: Any = None) -> int | None:
 
 @to_thread
 def scrape_movies(site_name: str, site_link: str, max_pages: int | None) -> List[MoviePayload]:
-    browser = Driver(uc=True, headless=True)
+    browser = Driver(uc=True, headless=True, binary_location=CHROMIUM_BINARY_PATH)
     a = datetime.now()
     movies = []
 
