@@ -1230,8 +1230,9 @@ async def end_session(message: discord.Message, user: Optional[User] = None):
     if message.embeds:
         embed = message.embeds[0]
         embed.remove_footer()
-        embed.colour = 0xff0000
-        embed.description = "`Sesja wygasła. Spróbuj ponownie.`"
+        if user.state != UserState.movie_details_watchlist and user.state != UserState.movie_details_search:
+            embed.colour = 0xff0000
+        embed.description = "`Sesja wygasła. Spróbuj ponownie.`\n\n" + embed.description
         await edit_message(message, embed=embed)
     else:
         await edit_message(message, content='Zakończono')
