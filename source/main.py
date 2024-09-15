@@ -62,7 +62,7 @@ help_command = commands.DefaultHelpCommand(
 )
 
 # Bot activity status
-activity = discord.Activity(type=discord.ActivityType.listening, name="m.help")
+activity = discord.Activity(type=discord.ActivityType.listening, name="m.help, m.search, m.watchlist")
 
 # Bot
 bot = discord.ext.commands.Bot(command_prefix=["m.", "M."], activity=activity, case_insensitive=True, intents=intents,
